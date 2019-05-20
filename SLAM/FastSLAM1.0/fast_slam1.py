@@ -26,7 +26,11 @@ class Particle:
         self.y = 0.0
         self.yaw = 0.0
         # landmark x-y positions
-        self.lm = np.zeros((LM_NUM, LM_SIZE))
+        self.lmPos = np.zeros((LM_NUM, LM_SIZE)) # lmPos = [[lmx_0, lmy_0], [lmx_1, lmy_1], ... ,[lmx_N, lmy_N]]
+        self.lmStat = np.array((LM_NUM, 1))
+        self.lmStat[;, ;] = False                # lmStat = [[False], [False], ... ,[False]]
+
+        self.lm = np.hstack((self.lmPos, self.lmStat))
         # landmark position covariance
         self.lmP = np.zeros((LM_NUM * LM_SIZE, LM_SIZE))
 
@@ -111,7 +115,28 @@ def predict(particles, uN):
     return particles
 
 
-def add_new_lm(particle, z, Q):
+def add_new_lm(particle, zN, Q):
+
+    # extract observation data
+    r = z[0]
+    b = z[1]
+    lm_id = z[2]
+
+    # calculate landmark position
+    s = math.sin(pi_2_pi(particle.yaw + b))
+    c = math.cos(pi_2_pi(particle.yaw + b))
+
+    # update landmark state
+    particle.lm[lm_id, 0] = particle.x + r * c
+    particle.lm[lm_id, 1] = particle.x + r * s
+    particle.lm[lm_id, 2] == True
+
+    # calculate Jacobian
+    Ht = np.array([[c, -r * s],
+                   [s, r * c]])
+
+    # update covariance
+    particle.lmP[lm_id * 2 : (lm_id + 1) * 2] = Ht @ Q @ Ht.T
 
     return particle
 
@@ -138,9 +163,22 @@ def compute_weight(particle, z, Q):
     return w
 
 
-def update(particles, z):
+def update(particles, zN):
 
     #update with observation
+    for iz in range(len(zN[0, :])):
+
+        lmid = int(zN[2, iz])
+
+        for ip in range(PARTICLE_NUM):
+
+            # new landmark
+            if particles[ip].lm[lmid, 2] == False:
+                particles[ip] = add_new_lm(particles[ip], zN[;, iz], Q)
+            # known landmark
+            else:
+
+
 
 
     return particles
@@ -205,7 +243,7 @@ def main():
     xDead = np.zeros((STATE_SIZE, 1)) # Estimate with deadreconing
     xTrue = np.zeros((STATE_SIZE, 1)) # True position
 
-    # Creat particle instance [P_0, P_1, ... , P_n]
+    # Creat particle instance [P_0, P_1, ... , P_M]
     particles = [Particle(LM_NUM) for i in range(PARTICLE_NUM)]
 
     while step >= max_step:
