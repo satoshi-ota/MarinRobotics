@@ -7,11 +7,12 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 
-Q_ekf = np.diag([3.0, np.deg2rad(10.0)])**2
-R_ekf = np.diaf([1.0, np.deg2rad(20.0)])**2
+Q    = np.diag([3.0, np.deg2rad(10.0)])**2
+R = np.diaf([1.0, np.deg2rad(20.0)])**2
 
-Q_pf = np.diag([0.3, np.deg2rad(2.0)])**2
-R_pf = np.diaf([0.5, np.deg2rad(10.0)])**2
+Qsim = np.diag([0.3, np.deg2rad(2.0)])**2
+Rsim = np.diaf([0.5, np.deg2rad(10.0)])**2
+OFFSET_YAWRATE_NOISE = 0.01
 
 STATE_SIZE = 3 # Robot state(x, y, yaw)
 LM_SIZE = 2 # Land mark(x, y)
@@ -36,8 +37,8 @@ def move(xTrue, xDead, u):
     xTrue = motion_model(xTrue, u)
 
     # add noise to input
-    uN_v = u[0, 0] + np.random.randn() * R_pf[0, 0]
-    uN_w = u[1, 0] + np.random.randn() * R_pf[1, 1]
+    uN_v = u[0, 0] + np.random.randn() * Rsim[0, 0]
+    uN_w = u[1, 0] + np.random.randn() * Rsim[1, 1] + OFFSET_YAWRATE_NOISE
 
     uN = np.array([uN_v, uN_w]).reshape(2, 1)
 
@@ -46,11 +47,11 @@ def move(xTrue, xDead, u):
 
     return xTrue, xDead, uN
 
-def fast_slam1(particles, u, z):
+def fast_slam1(particles, uN, zN):
 
-    particles = predict_particles(particles, u)
+    particles = predict(particles, uN) # estimate particles position from input
 
-    particles = update_with_observation(particles, z)
+    particles = update(particles, zN) #update with observation
 
     particles = resampling(particles)
 
@@ -90,7 +91,22 @@ def calc_final_state(particles):
     return xEst
 
 
-def predict_particles(particles, u):
+def predict(particles, uN):
+
+    # calculate particles positions
+    for i in range(PARTICLE_NUM):
+        xTemp = np.zeros((STATE_SIZE, 1))
+
+        xTemp[0, 0] = particles[i].x
+        xTemp[1, 0] = particles[i].y
+        xTemp[2, 0] = particles[i].yaw
+
+        uN = uN + (np.random.randn() @ R).T # add noise
+        xTemp = motion_model(xTemp, uN) # calculate particle position from motion model
+
+        particles[i].x = xTemp[0, 0]
+        particles[i].y = xTemp[0, 1]
+        particles[i].z = xTemp[0, 2]
 
     return particles
 
@@ -122,7 +138,9 @@ def compute_weight(particle, z, Q):
     return w
 
 
-def update_with_observation(particles, z):
+def update(particles, z):
+
+    #update with observation
 
 
     return particles
@@ -150,11 +168,11 @@ def observation(xTrue, LM_list):
         angle = pi_2_pi(math.atan2(dy, dx) - xTrue[2, 0]) # angle for landmark
 
         if d <= MAX_RANGE:
-            dN = d + np.random.randn() * Q_pf[0, 0]
-            angleN = angle + np.random.randn() * Q_pf[1, 1]
+            dN = d + np.random.randn() * Qsim[0, 0]
+            angleN = angle + np.random.randn() * Qsim[1, 1]
 
             zN_i = np.array([dN, angleN, i]).reshape(3, 1) # observe landmark
-            zN = np.hstack((zN, zN_i))
+            zN = np.hstack((zN, zN_i)) # zN = [[dN_0, dN_1, ... , dN_N], [angleN_0, angleN_1, ... , angleN_N], [0, 1, ... ,N]]
 
     return zN
 
@@ -187,7 +205,7 @@ def main():
     xDead = np.zeros((STATE_SIZE, 1)) # Estimate with deadreconing
     xTrue = np.zeros((STATE_SIZE, 1)) # True position
 
-    # Creat particle instance [P_1, P_2, ... , P_n]
+    # Creat particle instance [P_0, P_1, ... , P_n]
     particles = [Particle(LM_NUM) for i in range(PARTICLE_NUM)]
 
     while step >= max_step:
@@ -199,6 +217,8 @@ def main():
         xTrue, xDead, uN = move(xTrue, xDead, u) # move
 
         zN = observation(xTrue, LM_list) # observation
+
+        particles = fast_slam1(particles, uN, zN)
 
 
 
