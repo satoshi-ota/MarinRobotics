@@ -142,6 +142,12 @@ def add_new_lm(particle, zN, Q):
 
 
 def compute_jacobians(particle, xf, Pf, Q):
+	dx = xf[0, 0] - particle.x
+	dy = xf[1, 0] - particle.y
+	
+	d = math.sqrt(dx**2 + dy**2)
+
+		
 
     return zp, Hv, Hf, Sf
 
@@ -157,7 +163,13 @@ def update_landmark(particle, z, Q):
     return particle
 
 
-def compute_weight(particle, z, Q):
+def compute_weight(particle, zN, Q):
+
+	lm_id = int(zN[2])
+	xf = np.array(particle.lm[lm_id, 0:2]).reshape(2, 1)
+	Pf = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2])
+
+	zp, Hv, Hf, Sf = compute_jacobians(particle, xf, Pf, Q)
 
 
     return w
@@ -177,9 +189,9 @@ def update(particles, zN):
                 particles[ip] = add_new_lm(particles[ip], zN[;, iz], Q)
             # known landmark
             else:
-
-
-
+		w = compute_weight(particles[ip], zN[:, iz], Q)
+		particles[ip].w *= w
+		particles[ip] = update_landmark(particles[ip], z[:, iz], Q)
 
     return particles
 
