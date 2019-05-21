@@ -132,11 +132,11 @@ def add_new_lm(particle, zN, Q):
     particle.lm[lm_id, 2] == True
 
     # calculate Jacobian
-    Ht = np.array([[c, -r * s],
+    H = np.array([[c, -r * s],
                    [s, r * c]])
 
     # update covariance
-    particle.lmP[lm_id * 2 : (lm_id + 1) * 2] = Ht @ Q @ Ht.T
+    particle.lmP[lm_id * 2 : (lm_id + 1) * 2] = H @ Q @ H.T
 
     return particle
 
@@ -144,10 +144,10 @@ def add_new_lm(particle, zN, Q):
 def compute_jacobians(particle, xf, Pf, Q):
 	dx = xf[0, 0] - particle.x
 	dy = xf[1, 0] - particle.y
-	
+
 	d = math.sqrt(dx**2 + dy**2)
 
-		
+
 
     return zp, Hv, Hf, Sf
 
@@ -166,14 +166,34 @@ def update_landmark(particle, z, Q):
 def compute_weight(particle, zN, Q):
 
 	lm_id = int(zN[2])
-	xf = np.array(particle.lm[lm_id, 0:2]).reshape(2, 1)
-	Pf = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2])
+	mu = np.array(particle.lm[lm_id, 0:2]).reshape(2, 1)
+	Si = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2])
 
-	zp, Hv, Hf, Sf = compute_jacobians(particle, xf, Pf, Q)
+	mu, Si = update_with_EKF(mu, Si, Q)
 
 
     return w
 
+def update_with_EKF(mu, Si, Q):
+
+    # extract observation data
+    r = mu[0]   # d(t-1)
+    b = mu[1]   # angle(t-1)
+
+    # calculate landmark position
+    s = math.sin(pi_2_pi(particle.yaw + b))
+    c = math.cos(pi_2_pi(particle.yaw + b))
+
+    # calculate Jacobian
+    H = np.array([[c, -r * s],
+                   [s, r * c]])
+
+    Qp = H @ Si @ H.T + Q   # calculate covariance
+    Kp = Si @ H.T @ np.linalg.inv(Qp)   # calculate kalman gain
+
+    mu = mu + 
+
+    return mu, Si
 
 def update(particles, zN):
 
