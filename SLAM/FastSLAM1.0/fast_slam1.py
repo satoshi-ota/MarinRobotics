@@ -229,7 +229,18 @@ def observation(xTrue, LM_list):
 
 def motion_model(x, u):
 
+	F = np.array([[1.0, 0.0, 0.0],
+				  [0.0, 1.0, 0.0],
+				  [0.0, 0.0, 1.0]])
 
+	B = np.array([[DT * math.cos(x[2, 0]), 0.0],
+				  [DT * math.sin(x[2, 0]), 0.0],
+				  [0.0, DT]])
+
+	# motion model
+	x = F @ x + B @ u
+
+	x[2, 0] = pi_2_pi(x[2, 0])
 
     return x
 
