@@ -7,7 +7,7 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 
-Q    = np.diag([3.0, np.deg2rad(10.0)])**2
+Q    = np.diag([3.0, np.deg2rad(10.0), 0.1])**2
 R = np.diag([1.0, np.deg2rad(20.0)])**2
 
 Qsim = np.diag([0.3, np.deg2rad(2.0)])**2
@@ -19,7 +19,7 @@ MAX_STEP = 10000	# maximum step
 SIM_TIME = 60.0	# simulation time
 MAX_RANGE = 20.0	# maximum observation range
 STATE_SIZE = 3 # Robot state(x, y, yaw)
-LM_SIZE = 2 # Land mark(x, y)
+LM_SIZE = 3 # Land mark(x, y, lm_i)
 PARTICLE_NUM = 100 # Nuber of particles
 NTH = PARTICLE_NUM / 1.5  # Number of particle for re-sampling
 
@@ -75,11 +75,11 @@ def normalize_weight(particles):
     sumw = sum([p.w for p in particles])
 
     try:
-        for i in range(N_PARTICLE):
+        for i in range(PARTICLE_NUM):
             particles[i].w /= sumw
     except ZeroDivisionError:
-        for i in range(N_PARTICLE):
-            particles[i].w = 1.0 / N_PARTICLE
+        for i in range(PARTICLE_NUM):
+            particles[i].w = 1.0 / PARTICLE_NUM
 
         return particles
 
@@ -92,7 +92,7 @@ def calc_final_state(particles):
 
     particles = normalize_weight(particles)
 
-    for i in range(N_PARTICLE):
+    for i in range(PARTICLE_NUM):
         xSlam[0, 0] += particles[i].w * particles[i].x
         xSlam[1, 0] += particles[i].w * particles[i].y
         xSlam[2, 0] += particles[i].w * particles[i].yaw
@@ -113,12 +113,12 @@ def predict(particles, uN):
         xTemp[1, 0] = particles[i].y
         xTemp[2, 0] = particles[i].yaw
 
-        uN = uN + (np.random.randn() @ R).T # add noise
+        uN = uN + (np.random.randn(1, 2) @ R).T # add noise
         xTemp = motion_model(xTemp, uN) # calculate particle position from motion model
 
         particles[i].x = xTemp[0, 0]
-        particles[i].y = xTemp[0, 1]
-        particles[i].z = xTemp[0, 2]
+        particles[i].y = xTemp[1, 0]
+        particles[i].z = xTemp[2, 0]
 
     return particles
 
@@ -126,9 +126,9 @@ def predict(particles, uN):
 def add_new_lm(particle, zN, Q):
 
     # extract observation data
-    r = z[0]
-    b = z[1]
-    lm_id = z[2]
+    r = zN[0]
+    b = zN[1]
+    lm_id = int(zN[2])
 
     # calculate landmark position
     s = math.sin(pi_2_pi(particle.yaw + b))
@@ -147,24 +147,13 @@ def add_new_lm(particle, zN, Q):
 
     H = np.array([[-dx / d, -dy / d, 0],
                   [dx / q, -dy / q, -1],
-                  [0, 0, 0]])
+				  [0, 0, 0]])
 
     # update covariance
-    particle.lmP[lm_id * 2 : (lm_id + 1) * 2] = H @ Q @ H.T
+    particle.lmP[lm_id * 3 : (lm_id + 1) * 3] = H @ Q @ H.T
 
     return particle
 
-'''
-def compute_jacobians(particle, xf, Pf, Q):
-	dx = xf[0, 0] - particle.x
-	dy = xf[1, 0] - particle.y
-
-	d = math.sqrt(dx**2 + dy**2)
-
-
-
-    return zp, Hv, Hf, Sf
-'''
 
 def update_landmark(particle, zN, Q):
 
@@ -304,9 +293,9 @@ def calc_input(time):
 		yawrate = 0.0
 	else:
 		v = 1.0		# v[m/s]
-		w = 0.1		# w[rad/s]
+		yawrate = 0.1		# w[rad/s]
 
-	u = np.array([v, w]).reshape(2, 1)
+	u = np.array([v, yawrate]).reshape(2, 1)
 
 	return u
 
@@ -314,6 +303,7 @@ def calc_input(time):
 def observation(xTrue, LM_list):
 
     # calculate landmark positions
+    zN = np.zeros((3, 0))
     for i in range(len(LM_list[:, 0])):
         dx = LM_list[i, 0] - xTrue[0, 0]
         dy = LM_list[i, 1] - xTrue[1, 0]
@@ -371,10 +361,15 @@ def main():
     xDead = np.zeros((STATE_SIZE, 1)) # Estimate with deadreconing
     xTrue = np.zeros((STATE_SIZE, 1)) # True position
 
+	# history
+    hxSlam = xSlam
+    hxDead = xDead
+    hxTrue = xTrue
+
     # Creat particle instance [P_0, P_1, ... , P_M]
     particles = [Particle(LM_NUM) for i in range(PARTICLE_NUM)]
 
-    while step >= MAX_STEP:
+    while step <= MAX_STEP:
         step += 1
         time += DT
 
@@ -392,19 +387,19 @@ def main():
 
         # store data history
         hxSlam = np.hstack((hxSlam, x_state))
-        hxDR = np.hstack((hxDR, xDR))
+        hxDead = np.hstack((hxDead, xDead))
         hxTrue = np.hstack((hxTrue, xTrue))
 
         if show_animation:  # pragma: no cover
             plt.cla()
-            plt.plot(RFID[:, 0], RFID[:, 1], "*k")
+            plt.plot(LM_list[:, 0], LM_list[:, 1], "*k")
 
-            for i in range(N_PARTICLE):
+            for i in range(PARTICLE_NUM):
                 plt.plot(particles[i].x, particles[i].y, ".r")
                 plt.plot(particles[i].lm[:, 0], particles[i].lm[:, 1], "xb")
 
             plt.plot(hxTrue[0, :], hxTrue[1, :], "-b")
-            plt.plot(hxDR[0, :], hxDR[1, :], "-k")
+            plt.plot(hxDead[0, :], hxDead[1, :], "-k")
             plt.plot(hxSlam[0, :], hxSlam[1, :], "-r")
             plt.plot(xSlam[0], xSlam[1], "xk")
             plt.axis("equal")
