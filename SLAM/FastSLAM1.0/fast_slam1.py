@@ -8,16 +8,22 @@ import math
 import matplotlib.pyplot as plt
 
 Q    = np.diag([3.0, np.deg2rad(10.0)])**2
-R = np.diaf([1.0, np.deg2rad(20.0)])**2
+R = np.diag([1.0, np.deg2rad(20.0)])**2
 
 Qsim = np.diag([0.3, np.deg2rad(2.0)])**2
-Rsim = np.diaf([0.5, np.deg2rad(10.0)])**2
+Rsim = np.diag([0.5, np.deg2rad(10.0)])**2
 OFFSET_YAWRATE_NOISE = 0.01
 
+DT = 0.1	# time delta
+MAX_STEP = 10000	# maximum step
+SIM_TIME = 60.0	# simulation time
+MAX_RANGE = 20.0	# maximum observation range
 STATE_SIZE = 3 # Robot state(x, y, yaw)
 LM_SIZE = 2 # Land mark(x, y)
 PARTICLE_NUM = 100 # Nuber of particles
-NTH = N_PARTICLE / 1.5  # Number of particle for re-sampling
+NTH = PARTICLE_NUM / 1.5  # Number of particle for re-sampling
+
+show_animation = True
 
 class Particle:
 
@@ -28,8 +34,9 @@ class Particle:
         self.yaw = 0.0
         # landmark x-y positions
         self.lmPos = np.zeros((LM_NUM, LM_SIZE)) # lmPos = [[lmx_0, lmy_0], [lmx_1, lmy_1], ... ,[lmx_N, lmy_N]]
-        self.lmStat = np.array((LM_NUM, 1))
-        self.lmStat[;, ;] = False                # lmStat = [[False], [False], ... ,[False]]
+        #self.lmStat = np.array((LM_NUM, 1))
+        self.lmStat = np.array([[False], [False], [False], [False], [False]])
+        #self.lmStat[:, 0] = False                # lmStat = [[False], [False], ... ,[False]]
 
         self.lm = np.hstack((self.lmPos, self.lmStat))
         # landmark position covariance
@@ -147,7 +154,7 @@ def add_new_lm(particle, zN, Q):
 
     return particle
 
-
+'''
 def compute_jacobians(particle, xf, Pf, Q):
 	dx = xf[0, 0] - particle.x
 	dy = xf[1, 0] - particle.y
@@ -157,35 +164,35 @@ def compute_jacobians(particle, xf, Pf, Q):
 
 
     return zp, Hv, Hf, Sf
-
+'''
 
 def update_landmark(particle, zN, Q):
 
-    lm_id = int(zN[2])
+	lm_id = int(zN[2])
 	mu = np.array(particle.lm[lm_id, 0:2]).reshape(2, 1) # (lm_x, lm_y)
 	Si = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2]) # covariance
 
     # calculate Jacobian
-    dx = mu[0] - particle.x
-    dy = mu[1] - particle.y
-    q = dx**2 + dy**2
-    d = math.sqrt(q)
+	dx = mu[0] - particle.x
+	dy = mu[1] - particle.y
+	q = dx**2 + dy**2
+	d = math.sqrt(q)
 
-    H = np.array([[-dx / d, -dy / d, 0],
+	H = np.array([[-dx / d, -dy / d, 0],
                   [dx / q, -dy / q, -1],
                   [0, 0, 0]])
 
     # calculate Inovation Vector
-    zNh = np.array([d, math.atan2(dy, dx) - particle.yaw).reshape(3, 1)
-    dz = (zN - zNh).T # Inovation Vector
-    dz[1, 0] = pi_2_pi(dz[1, 0])
+	zNh = np.array([d, math.atan2(dy, dx) - particle.yaw]).reshape(3, 1)
+	dz = (zN - zNh).T # Inovation Vector
+	dz[1, 0] = pi_2_pi(dz[1, 0])
 
 	mu, Si = update_with_EKF(mu, Si, dz, H, Q)
 
-    particle.lm[lm_id, :] = mu.T
-    particle.lmP[lm_id * 2 : (lm_id + 1) * 2] = Si
+	particle.lm[lm_id, :] = mu.T
+	particle.lmP[lm_id * 2 : (lm_id + 1) * 2] = Si
 
-    return particle
+	return particle
 
 
 def compute_weight(particle, zN, Q):
@@ -195,59 +202,59 @@ def compute_weight(particle, zN, Q):
 	Si = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2]) # covariance
 
     # calculate Jacobian
-    dx = mu[0] - particle.x
-    dy = mu[1] - particle.y
-    q = dx**2 + dy**2
-    d = math.sqrt(q)
+	dx = mu[0] - particle.x
+	dy = mu[1] - particle.y
+	q = dx**2 + dy**2
+	d = math.sqrt(q)
 
-    H = np.array([[-dx / d, -dy / d, 0],
+	H = np.array([[-dx / d, -dy / d, 0],
                   [dx / q, -dy / q, -1],
                   [0, 0, 0]])
 
     # calculate Inovation Vector
-    zNh = np.array([d, math.atan2(dy, dx) - particle.yaw).reshape(3, 1)
-    dz = (zN - zNh).T # Inovation Vector
-    dz[1, 0] = pi_2_pi(dz[1, 0])
+	zNh = np.array([d, math.atan2(dy, dx) - particle.yaw]).reshape(3, 1)
+	dz = (zN - zNh).T # Inovation Vector
+	dz[1, 0] = pi_2_pi(dz[1, 0])
 
-    Qp = H @ Si @ H.T + Q   # observation covariance
-    QpInv = np.linalg.inv(Qp)   # Q^-1
+	Qp = H @ Si @ H.T + Q   # observation covariance
+	QpInv = np.linalg.inv(Qp)   # Q^-1
 
     # compute particle wight
-    num = math.exp(-0.5 * dz.T @ QpInv @dz)
-    den = 2 * math.pi * math.sqrt(np.linalg.det(Q))
-    w = num / den
+	num = math.exp(-0.5 * dz.T @ QpInv @dz)
+	den = 2 * math.pi * math.sqrt(np.linalg.det(Q))
+	w = num / den
 
-    return w
+	return w
 
 def update_with_EKF(mu, Si, dz, H, Q):
 
-    Qp = H @ Si @ H.T + Q   # observation covariance
-    Kp = Si @ H.T @ np.linalg.inv(Qp)   # calculate kalman gain
+	Qp = H @ Si @ H.T + Q   # observation covariance
+	Kp = Si @ H.T @ np.linalg.inv(Qp)   # calculate kalman gain
 
-    mu = mu + K @ dz    # update average
-    Si = (np.eye(LM_SIZE) - (Kp @ H)) @ Si  # update covariance
+	mu = mu + K @ dz    # update average
+	Si = (np.eye(LM_SIZE) - (Kp @ H)) @ Si  # update covariance
 
-    return mu, Si
+	return mu, Si
 
 def update_with_observation(particles, zN):
 
     #update with observation
-    for iz in range(len(zN[0, :])):
+	for iz in range(len(zN[0, :])):
 
-        lmid = int(zN[2, iz])
+		lmid = int(zN[2, iz])
 
-        for ip in range(PARTICLE_NUM):
+		for ip in range(PARTICLE_NUM):
 
             # new landmark
-            if particles[ip].lm[lmid, 2] == False:
-                particles[ip] = add_new_lm(particles[ip], zN[;, iz], Q)
+			if particles[ip].lm[lmid, 2] == False:
+				particles[ip] = add_new_lm(particles[ip], zN[:, iz], Q)
             # known landmark
-            else:
-		        w = compute_weight(particles[ip], zN[:, iz], Q)
-		        particles[ip].w *= w
-		        particles[ip] = update_landmark(particles[ip], z[:, iz], Q)
+			else:
+				w = compute_weight(particles[ip], zN[:, iz], Q)
+				particles[ip].w *= w
+				particles[ip] = update_landmark(particles[ip], z[:, iz], Q)
 
-    return particles
+	return particles
 
 
 def resampling(particles):
@@ -291,8 +298,17 @@ def resampling(particles):
 
 
 def calc_input(time):
+	
+	if time <= 3.0:	# wait at first
+		v = 0.0
+		yawrate = 0.0
+	else:
+		v = 1.0		# v[m/s]
+		w = 0.1		# w[rad/s]
 
-    return u
+	u = np.array([v, w]).reshape(2, 1)
+
+	return u
 
 
 def observation(xTrue, LM_list):
@@ -330,7 +346,7 @@ def motion_model(x, u):
 
 	x[2, 0] = pi_2_pi(x[2, 0])
 
-    return x
+	return x
 
 
 def pi_2_pi(angle):
@@ -341,12 +357,13 @@ def main():
     print("running...")
 
     time = 0.0;
+    step = 0;
 
-    LM_list = ([[10.0, -5.0],
-                [4.0, 7.0],
-                [8.0, -13.0],
-                [-3.0, 6.0],
-                [2.0, 8.0]])
+    LM_list = np.array([[10.0, -5.0],
+                		[4.0, 7.0],
+                		[8.0, -13.0],
+                		[-3.0, 6.0],
+                		[2.0, 8.0]])
 
     LM_NUM = LM_list.shape[0]
 
@@ -357,7 +374,7 @@ def main():
     # Creat particle instance [P_0, P_1, ... , P_M]
     particles = [Particle(LM_NUM) for i in range(PARTICLE_NUM)]
 
-    while step >= max_step:
+    while step >= MAX_STEP:
         step += 1
         time += DT
 
