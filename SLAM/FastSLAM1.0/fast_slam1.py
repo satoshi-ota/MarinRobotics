@@ -61,7 +61,7 @@ def move(xTrue, xDead, u):
 
 def fast_slam1(particles, uN, zN):
 
-    particles = predict(particles, uN) # estimate particles position from input
+    particles = predict_particles(particles, uN) # estimate particles position from input
 
     particles = update_with_observation(particles, zN) #update with observation
 
@@ -103,7 +103,7 @@ def calc_final_state(particles):
     return xSlam
 
 
-def predict(particles, uN):
+def predict_particles(particles, uN):
 
     # calculate particles positions
     for i in range(PARTICLE_NUM):
@@ -118,7 +118,7 @@ def predict(particles, uN):
 
         particles[i].x = xTemp[0, 0]
         particles[i].y = xTemp[1, 0]
-        particles[i].z = xTemp[2, 0]
+        particles[i].yaw = xTemp[2, 0]
 
     return particles
 
@@ -150,7 +150,8 @@ def add_new_lm(particle, zN, Q):
 				  [0, 0, 0]])
 
     # update covariance
-    particle.lmP[lm_id * 3 : (lm_id + 1) * 3] = H @ Q @ H.T
+    HInv = np.linalg.inv(H)
+    particle.lmP[lm_id * 3 : (lm_id + 1) * 3] = HInv @ Q @ HInv.T
 
     return particle
 
@@ -158,8 +159,8 @@ def add_new_lm(particle, zN, Q):
 def update_landmark(particle, zN, Q):
 
 	lm_id = int(zN[2])
-	mu = np.array(particle.lm[lm_id, 0:2]).reshape(2, 1) # (lm_x, lm_y)
-	Si = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2]) # covariance
+	mu = np.array(particle.lm[lm_id, 0:2]).reshape(2, 1) # (lm_x[t-1], lm_y[t-1])
+	Si = np.array(particle.lmP[lm_id * 3 : (lm_id + 1) * 3]) # covariance[t-1]
 
     # calculate Jacobian
 	dx = mu[0] - particle.x
@@ -167,13 +168,13 @@ def update_landmark(particle, zN, Q):
 	q = dx**2 + dy**2
 	d = math.sqrt(q)
 
-	H = np.array([[-dx / d, -dy / d, 0],
-                  [dx / q, -dy / q, -1],
-                  [0, 0, 0]])
+	H = np.array([[-dx / d, -dy / d, 0.0],
+                  [dx / q, -dy / q, -1.0],
+                  [0.0, 0.0, 0.0]])
 
     # calculate Inovation Vector
-	zNh = np.array([d, math.atan2(dy, dx) - particle.yaw]).reshape(3, 1)
-	dz = (zN - zNh).T # Inovation Vector
+	zNh = np.array([d, math.atan2(dy, dx) - particle.yaw]).reshape(2, 1)
+	dz = (zN[0:2] - zNh).T # Inovation Vector
 	dz[1, 0] = pi_2_pi(dz[1, 0])
 
 	mu, Si = update_with_EKF(mu, Si, dz, H, Q)
@@ -188,7 +189,7 @@ def compute_weight(particle, zN, Q):
 
 	lm_id = int(zN[2])
 	mu = np.array(particle.lm[lm_id, 0:2]).reshape(2, 1) # (lm_x, lm_y)
-	Si = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2]) # covariance
+	Si = np.array(particle.lmP[lm_id * 3 : (lm_id + 1) * 3]) # covariance
 
     # calculate Jacobian
 	dx = mu[0] - particle.x
@@ -196,12 +197,11 @@ def compute_weight(particle, zN, Q):
 	q = dx**2 + dy**2
 	d = math.sqrt(q)
 
-	H = np.array([[-dx / d, -dy / d, 0],
-                  [dx / q, -dy / q, -1],
-                  [0, 0, 0]])
+	H = np.array([[-dx / d, -dy / d, 0.0],
+                  [dx / q, -dy / q, -1.0]])
 
     # calculate Inovation Vector
-	zNh = np.array([d, math.atan2(dy, dx) - particle.yaw]).reshape(3, 1)
+	zNh = np.array([d, math.atan2(dy, dx) - particle.yaw, lm_id]).reshape(2, 1)
 	dz = (zN - zNh).T # Inovation Vector
 	dz[1, 0] = pi_2_pi(dz[1, 0])
 
@@ -287,7 +287,7 @@ def resampling(particles):
 
 
 def calc_input(time):
-	
+
 	if time <= 3.0:	# wait at first
 		v = 0.0
 		yawrate = 0.0
