@@ -7,7 +7,8 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 
-Q    = np.diag([1.0, np.deg2rad(5.0)])**2
+# FastSLAM Covariance
+Q = np.diag([1.0, np.deg2rad(5.0)])**2
 R = np.diag([0.5, np.deg2rad(10.0)])**2
 
 Qsim = np.diag([0.3, np.deg2rad(2.0)])**2
@@ -159,7 +160,7 @@ def update_landmark(particle, zN, Q):
 
 	lm_id = int(zN[2])
 	lmx = np.array(particle.lm[lm_id, 0:2]).reshape(2, 1) # (lm_x[t-1], lm_y[t-1])
-	lmP = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2]) # covariance[t-1]
+	lmP = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2, :]) # covariance[t-1]
 
     # calculate Jacobian
 	dx = lmx[0] - particle.x
@@ -178,7 +179,7 @@ def update_landmark(particle, zN, Q):
 	lmx, lmP = update_with_EKF(lmx, lmP, dz, H, Q)
 
 	particle.lm[lm_id, :] = lmx.T
-	particle.lmP[lm_id * 2 : (lm_id + 1) * 2] = lmP
+	particle.lmP[lm_id * 2 : (lm_id + 1) * 2, :] = lmP
 
 	return particle
 
@@ -190,8 +191,8 @@ def compute_weight(particle, zN, Q):
 	lmP = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2]) # covariance
 
     # calculate Jacobian
-	dx = mu[0] - particle.x
-	dy = mu[1] - particle.y
+	dx = lmx[0] - particle.x
+	dy = lmx[1] - particle.y
 	q = dx**2 + dy**2
 	d = math.sqrt(q)
 
@@ -200,7 +201,7 @@ def compute_weight(particle, zN, Q):
 
     # calculate Inovation Vector
 	zNh = np.array([d, math.atan2(dy, dx) - particle.yaw]).reshape(2, 1)
-	dz = (zN - zNh).T # Inovation Vector
+	dz = (zN[0:2] - zNh).T # Inovation Vector
 	dz[1, 0] = pi_2_pi(dz[1, 0])
 
 	Qt = H @ lmP @ H.T + Q   # observation covariance
