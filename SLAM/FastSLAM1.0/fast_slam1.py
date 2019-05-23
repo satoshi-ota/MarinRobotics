@@ -8,8 +8,8 @@ import math
 import matplotlib.pyplot as plt
 
 # Fast SLAM covariance
-Q = np.diag([3.0, np.deg2rad(10.0)])**2
-R = np.diag([1.0, np.deg2rad(20.0)])**2
+Q = np.diag([0.3, np.deg2rad(2.0)])**2
+R = np.diag([0.1, np.deg2rad(5.0)])**2
 
 #  Simulation parameter
 Qsim = np.diag([0.3, np.deg2rad(2.0)])**2
@@ -37,7 +37,7 @@ class Particle:
         # landmark x-y positions
         self.lmPos = np.zeros((LM_NUM, LM_SIZE)) # lmPos = [[lmx_0, lmy_0], [lmx_1, lmy_1], ... ,[lmx_N, lmy_N]]
         #self.lmStat = np.array((LM_NUM, 1))
-        self.lmStat = np.array([[False], [False], [False], [False], [False]])
+        self.lmStat = np.array([[False], [False], [False], [False], [False], [False], [False], [False]])
         #self.lmStat[:, 0] = False                # lmStat = [[False], [False], ... ,[False]]
 
         self.lm = np.hstack((self.lmPos, self.lmStat))
@@ -244,6 +244,7 @@ def update_with_observation(particles, zN):
                 w = compute_weight(particles[ip], zN[:, iz], Q)
                 particles[ip].w *= w
                 particles[ip] = update_landmark(particles[ip], zN[:, iz], Q)
+                #print("update")
 
     return particles
 
@@ -351,11 +352,14 @@ def main():
     time = 0.0;
     step = 0;
 
-    LM_list = np.array([[10.0, -5.0],
-                		[4.0, 7.0],
-                		[8.0, -13.0],
-                		[-3.0, 6.0],
-                		[2.0, 8.0]])
+    LM_list = np.array([[10.0, -2.0],
+                        [15.0, 10.0],
+                        [15.0, 15.0],
+                        [10.0, 20.0],
+                        [3.0, 15.0],
+                        [-5.0, 20.0],
+                        [-5.0, 5.0],
+                        [-10.0, 15.0]])
 
     LM_NUM = LM_list.shape[0]
 
