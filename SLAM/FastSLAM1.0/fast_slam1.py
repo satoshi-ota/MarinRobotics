@@ -137,7 +137,7 @@ def add_new_lm(particle, zN, Q):
 
     # update landmark state
     particle.lm[lm_id, 0] = particle.x + r * c
-    particle.lm[lm_id, 1] = particle.x + r * s
+    particle.lm[lm_id, 1] = particle.y + r * s
     particle.lm[lm_id, 2] == True
 
     # calculate Jacobian
