@@ -7,16 +7,16 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 
-Q    = np.diag([3.0, np.deg2rad(10.0)])**2
-R = np.diag([1.0, np.deg2rad(20.0)])**2
+Q    = np.diag([1.0, np.deg2rad(5.0)])**2
+R = np.diag([0.5, np.deg2rad(10.0)])**2
 
 Qsim = np.diag([0.3, np.deg2rad(2.0)])**2
 Rsim = np.diag([0.5, np.deg2rad(10.0)])**2
 OFFSET_YAWRATE_NOISE = 0.01
 
 DT = 0.1	# time delta
-MAX_STEP = 10000	# maximum step
-SIM_TIME = 60.0	# simulation time
+MAX_STEP = 1000 	# maximum step
+SIM_TIME = 20.0	# simulation time
 MAX_RANGE = 20.0	# maximum observation range
 STATE_SIZE = 3 # Robot state(x, y, yaw)
 LM_SIZE = 2 # Land mark(x, y)
@@ -175,7 +175,7 @@ def update_landmark(particle, zN, Q):
 	dz = (zN[0:2] - zNh).T # Inovation Vector
 	dz[1, 0] = pi_2_pi(dz[1, 0])
 
-	lmx, lmP = update_with_EKF(lmx, P, dz, H, Q)
+	lmx, lmP = update_with_EKF(lmx, lmP, dz, H, Q)
 
 	particle.lm[lm_id, :] = lmx.T
 	particle.lmP[lm_id * 2 : (lm_id + 1) * 2] = lmP
@@ -186,8 +186,8 @@ def update_landmark(particle, zN, Q):
 def compute_weight(particle, zN, Q):
 
 	lm_id = int(zN[2])
-	mu = np.array(particle.lm[lm_id, 0:2]).reshape(2, 1) # (lm_x, lm_y)
-	Si = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2]) # covariance
+	lmx = np.array(particle.lm[lm_id, 0:2]).reshape(2, 1) # (lm_x, lm_y)
+	lmP = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2]) # covariance
 
     # calculate Jacobian
 	dx = mu[0] - particle.x
@@ -199,15 +199,15 @@ def compute_weight(particle, zN, Q):
                   [-dx / q, dy / q]])
 
     # calculate Inovation Vector
-	zNh = np.array([d, math.atan2(dy, dx) - particle.yaw, lm_id]).reshape(2, 1)
+	zNh = np.array([d, math.atan2(dy, dx) - particle.yaw]).reshape(2, 1)
 	dz = (zN - zNh).T # Inovation Vector
 	dz[1, 0] = pi_2_pi(dz[1, 0])
 
-	Qt = H @ Si @ H.T + Q   # observation covariance
+	Qt = H @ lmP @ H.T + Q   # observation covariance
 	QtInv = np.linalg.inv(Qt)   # Q^-1
 
     # compute particle wight
-	num = math.exp(-0.5 * dz.T @ QtInv @dz)
+	num = math.exp(-0.5 * dz.T @ QtInv @ dz)
 	den = 2 * math.pi * math.sqrt(np.linalg.det(Qt))
 	w = num / den
 
