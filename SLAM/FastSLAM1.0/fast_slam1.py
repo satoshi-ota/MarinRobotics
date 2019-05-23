@@ -203,12 +203,12 @@ def compute_weight(particle, zN, Q):
 	dz = (zN - zNh).T # Inovation Vector
 	dz[1, 0] = pi_2_pi(dz[1, 0])
 
-	Qp = H @ Si @ H.T + Q   # observation covariance
-	QpInv = np.linalg.inv(Qp)   # Q^-1
+	Qt = H @ Si @ H.T + Q   # observation covariance
+	QtInv = np.linalg.inv(Qt)   # Q^-1
 
     # compute particle wight
-	num = math.exp(-0.5 * dz.T @ QpInv @dz)
-	den = 2 * math.pi * math.sqrt(np.linalg.det(Q))
+	num = math.exp(-0.5 * dz.T @ QtInv @dz)
+	den = 2 * math.pi * math.sqrt(np.linalg.det(Qt))
 	w = num / den
 
 	return w
