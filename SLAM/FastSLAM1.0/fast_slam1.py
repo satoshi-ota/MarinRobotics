@@ -7,10 +7,11 @@ import numpy as np
 import math
 import matplotlib.pyplot as plt
 
-# FastSLAM Covariance
-Q = np.diag([1.0, np.deg2rad(5.0)])**2
-R = np.diag([0.5, np.deg2rad(10.0)])**2
+# Fast SLAM covariance
+Q = np.diag([3.0, np.deg2rad(10.0)])**2
+R = np.diag([1.0, np.deg2rad(20.0)])**2
 
+#  Simulation parameter
 Qsim = np.diag([0.3, np.deg2rad(2.0)])**2
 Rsim = np.diag([0.5, np.deg2rad(10.0)])**2
 OFFSET_YAWRATE_NOISE = 0.01
@@ -138,7 +139,7 @@ def add_new_lm(particle, zN, Q):
     # update landmark state
     particle.lm[lm_id, 0] = particle.x + r * c
     particle.lm[lm_id, 1] = particle.y + r * s
-    particle.lm[lm_id, 2] == True
+    particle.lm[lm_id, 2] = True
 
     # calculate Jacobian
     dx = particle.lm[lm_id, 0] - particle.x
@@ -147,9 +148,9 @@ def add_new_lm(particle, zN, Q):
     d = math.sqrt(q)
 
     H = np.array([[ dx / d, dy / d],
-                  [-dx / q, dy / q]])
+                  [-dy / q, dx / q]])
 
-    # update covariance
+    # initialize covariance
     HInv = np.linalg.inv(H)
     particle.lmP[lm_id * 2 : (lm_id + 1) * 2] = HInv @ Q @ HInv.T
 
@@ -158,91 +159,93 @@ def add_new_lm(particle, zN, Q):
 
 def update_landmark(particle, zN, Q):
 
-	lm_id = int(zN[2])
-	lmx = np.array(particle.lm[lm_id, 0:2]).reshape(2, 1) # (lm_x[t-1], lm_y[t-1])
-	lmP = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2, :]) # covariance[t-1]
+    lm_id = int(zN[2])
+    lmx = np.array(particle.lm[lm_id, 0:2]).reshape(2, 1) # (lm_x[t-1], lm_y[t-1])
+    lmP = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2, :]) # covariance[t-1]
 
     # calculate Jacobian
-	dx = lmx[0] - particle.x
-	dy = lmx[1] - particle.y
-	q = dx**2 + dy**2
-	d = math.sqrt(q)
+    dx = lmx[0, 0] - particle.x
+    dy = lmx[1, 0] - particle.y
+    q = dx**2 + dy**2
+    d = math.sqrt(q)
 
-	H = np.array([[ dx / d, dy / d],
-                  [-dx / q, dy / q]])
+    H = np.array([[ dx / d, dy / d],
+                  [-dy / q, dx / q]])
 
     # calculate Inovation Vector
-	zNh = np.array([d, math.atan2(dy, dx) - particle.yaw]).reshape(2, 1)
-	dz = (zN[0:2] - zNh).T # Inovation Vector
-	dz[1, 0] = pi_2_pi(dz[1, 0])
+    zNh = np.array([d, math.atan2(dy, dx) - particle.yaw]).reshape(2, 1)
+    zNh[1, 0] = pi_2_pi(zNh[1, 0])
+    dz = zN[0:2].reshape(2, 1) - zNh # Inovation Vector
+    dz[1, 0] = pi_2_pi(dz[1, 0])
 
-	lmx, lmP = update_with_EKF(lmx, lmP, dz, H, Q)
+    lmx, lmP = update_with_EKF(lmx, lmP, dz, H, Q)
 
-	particle.lm[lm_id, :] = lmx.T
-	particle.lmP[lm_id * 2 : (lm_id + 1) * 2, :] = lmP
-
-	return particle
+    particle.lm[lm_id, 0:2] = lmx.T
+    particle.lmP[lm_id * 2 : (lm_id + 1) * 2, :] = lmP
+    #print("update")
+    return particle
 
 
 def compute_weight(particle, zN, Q):
 
-	lm_id = int(zN[2])
-	lmx = np.array(particle.lm[lm_id, 0:2]).reshape(2, 1) # (lm_x, lm_y)
-	lmP = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2]) # covariance
+    lm_id = int(zN[2])
+    lmx = np.array(particle.lm[lm_id, 0:2]).reshape(2, 1) # (lm_x, lm_y)
+    lmP = np.array(particle.lmP[lm_id * 2 : (lm_id + 1) * 2, :]) # covariance
 
     # calculate Jacobian
-	dx = lmx[0] - particle.x
-	dy = lmx[1] - particle.y
-	q = dx**2 + dy**2
-	d = math.sqrt(q)
+    dx = lmx[0, 0] - particle.x
+    dy = lmx[1, 0] - particle.y
+    q = dx**2 + dy**2
+    d = math.sqrt(q)
 
-	H = np.array([[ dx / d, dy / d],
-                  [-dx / q, dy / q]])
+    H = np.array([[ dx / d, dy / d],
+                  [-dy / q, dx / q]])
 
     # calculate Inovation Vector
-	zNh = np.array([d, math.atan2(dy, dx) - particle.yaw]).reshape(2, 1)
-	dz = (zN[0:2] - zNh).T # Inovation Vector
-	dz[1, 0] = pi_2_pi(dz[1, 0])
-
-	Qt = H @ lmP @ H.T + Q   # observation covariance
-	QtInv = np.linalg.inv(Qt)   # Q^-1
+    zNh = np.array([d, math.atan2(dy, dx) - particle.yaw]).reshape(2, 1)
+    zNh[1, 0] = pi_2_pi(zNh[1, 0])
+    dz = zN[0:2].reshape(2, 1) - zNh # Inovation Vector
+    dz[1, 0] = pi_2_pi(dz[1, 0])
+    #print(H)
+    Qt = H @ lmP @ H.T + Q   # observation covariance
+    QtInv = np.linalg.inv(Qt)   # Q^-1
 
     # compute particle wight
-	num = math.exp(-0.5 * dz.T @ QtInv @ dz)
-	den = 2 * math.pi * math.sqrt(np.linalg.det(Qt))
-	w = num / den
+    num = math.exp(-0.5 * dz.T @ QtInv @ dz)
+    den = 2 * math.pi * math.sqrt(np.linalg.det(Qt))
+    w = num / den
 
-	return w
+    return w
 
 def update_with_EKF(lmx, lmP, dz, H, Q):
 
-	Qt = H @ lmP @ H.T + Q   # observation covariance
-	Kt = lmP @ H.T @ np.linalg.inv(Qt)   # calculate kalman gain
+    Qt = H @ lmP @ H.T + Q   # observation covariance
+    Kt = lmP @ H.T @ np.linalg.inv(Qt)   # calculate kalman gain
 
-	lmx = lmx + Kt @ dz    # update average
-	lmP = (np.eye(LM_SIZE) - (Kt @ H)) @ lmP  # update covariance
+    lmx = lmx + Kt @ dz    # update average
+    lmP = (np.eye(LM_SIZE) - (Kt @ H)) @ lmP  # update covariance
 
-	return lmx, lmP
+    return lmx, lmP
 
 def update_with_observation(particles, zN):
 
     #update with observation
-	for iz in range(len(zN[0, :])):
+    for iz in range(len(zN[0, :])):
 
-		lmid = int(zN[2, iz])
+        lmid = int(zN[2, iz])
 
-		for ip in range(PARTICLE_NUM):
+        for ip in range(PARTICLE_NUM):
 
             # new landmark
-			if particles[ip].lm[lmid, 2] == False:
-				particles[ip] = add_new_lm(particles[ip], zN[:, iz], Q)
+            if particles[ip].lm[lmid, 2] == False:
+                particles[ip] = add_new_lm(particles[ip], zN[:, iz], Q)
             # known landmark
-			else:
-				w = compute_weight(particles[ip], zN[:, iz], Q)
-				particles[ip].w *= w
-				particles[ip] = update_landmark(particles[ip], z[:, iz], Q)
+            else:
+                w = compute_weight(particles[ip], zN[:, iz], Q)
+                particles[ip].w *= w
+                particles[ip] = update_landmark(particles[ip], zN[:, iz], Q)
 
-	return particles
+    return particles
 
 
 def resampling(particles):
