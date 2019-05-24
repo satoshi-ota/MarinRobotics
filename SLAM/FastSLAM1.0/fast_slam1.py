@@ -11,9 +11,6 @@ import matplotlib.pyplot as plt
 Q = np.diag([0.3, np.deg2rad(4.0)])**2
 R = np.diag([0.1, np.deg2rad(8.0)])**2
 
-#  Simulation parameter
-Qsim = np.diag([0.3, np.deg2rad(2.0)])**2
-Rsim = np.diag([0.5, np.deg2rad(10.0)])**2
 OFFSET_YAWRATE_NOISE = 0.01
 
 DT = 0.1	# time delta
