@@ -8,13 +8,10 @@ import math
 import matplotlib.pyplot as plt
 
 # Fast SLAM covariance
-Q = np.diag([0.4, np.deg2rad(4.0)])**2
-R = np.diag([0.2, np.deg2rad(10.0)])**2
+Q = np.diag([0.4, np.deg2rad(5.0)])**2
+R = np.diag([0.8, np.deg2rad(10.0)])**2
 
-#  Simulation parameter
-Qsim = np.diag([0.3, np.deg2rad(2.0)])**2
-Rsim = np.diag([0.5, np.deg2rad(10.0)])**2
-OFFSET_YAWRATE_NOISE = 0.01
+OFFSET_YAWRATE_NOISE = 0.005
 
 DT = 0.1	# time delta
 MAX_STEP = 1000 	# maximum step
@@ -22,8 +19,8 @@ SIM_TIME = 20.0	# simulation time
 MAX_RANGE = 20.0	# maximum observation range
 STATE_SIZE = 3 # Robot state(x, y, yaw)
 LM_SIZE = 2 # Land mark(x, y)
-PARTICLE_NUM = 100 # Nuber of particles
-NTH = PARTICLE_NUM / 1.5  # Number of particle for re-sampling
+PARTICLE_NUM = 120 # Nuber of particles
+NTH = PARTICLE_NUM / 10.0  # Number of particle for re-sampling
 
 show_animation = True
 
@@ -51,9 +48,8 @@ def move(xTrue, xDead, u):
     xTrue = motion_model(xTrue, u)
 
     # add noise to input
-    uN_v = u[0, 0] + np.random.randn() * Rsim[0, 0]
-    uN_w = u[1, 0] + np.random.randn() * Rsim[1, 1] + OFFSET_YAWRATE_NOISE
-
+    uN_v = u[0, 0] + np.random.randn() * R[0, 0]
+    uN_w = u[1, 0] + np.random.randn() * R[1, 1] + OFFSET_YAWRATE_NOISE
     uN = np.array([uN_v, uN_w]).reshape(2, 1)
 
     # calculate deadreconing
@@ -61,9 +57,9 @@ def move(xTrue, xDead, u):
 
     return xTrue, xDead, uN
 
-def fast_slam1(particles, uN, zN):
+def fast_slam1(particles, u, zN):
 
-    particles = predict_particles(particles, uN) # estimate particles position from input
+    particles = predict_particles(particles, u) # estimate particles position from input
 
     particles = update_with_observation(particles, zN) #update with observation
 
@@ -105,7 +101,7 @@ def calc_final_state(particles):
     return xSlam
 
 
-def predict_particles(particles, uN):
+def predict_particles(particles, u):
 
     # calculate particles positions
     for i in range(PARTICLE_NUM):
@@ -115,7 +111,10 @@ def predict_particles(particles, uN):
         xTemp[1, 0] = particles[i].y
         xTemp[2, 0] = particles[i].yaw
 
-        uN = uN + (np.random.randn(1, 2) @ R).T # add noise
+        uN_v = u[0, 0] + np.random.randn() * R[0, 0]
+        uN_w = u[1, 0] + np.random.randn() * R[1, 1] + OFFSET_YAWRATE_NOISE
+        uN = np.array([uN_v, uN_w]).reshape(2, 1)
+        #uN = u + (np.random.randn(1, 2) @ R).T # add noise
         xTemp = motion_model(xTemp, uN) # calculate particle position from motion model
 
         particles[i].x = xTemp[0, 0]
@@ -266,6 +265,7 @@ def resampling(particles):
     # print(Neff)
 
     if Neff < NTH:  # resampling
+        print("resampling")
         wcum = np.cumsum(pw)
         base = np.cumsum(pw * 0.0 + 1 / PARTICLE_NUM) - 1 / PARTICLE_NUM
         resampleid = base + np.random.rand(base.shape[0]) / PARTICLE_NUM
@@ -296,7 +296,7 @@ def calc_input(time):
 		yawrate = 0.0
 	else:
 		v = np.random.rand()		# v[m/s]
-		yawrate = np.random.randn() 		# w[rad/s]
+		yawrate = np.random.randn()		# w[rad/s]
 
 	u = np.array([v, yawrate]).reshape(2, 1)
 
@@ -315,8 +315,8 @@ def observation(xTrue, LM_list):
         angle = pi_2_pi(math.atan2(dy, dx) - xTrue[2, 0]) # angle for landmark
 
         if d <= MAX_RANGE:
-            dN = d + np.random.randn() * Qsim[0, 0]
-            angleN = angle + np.random.randn() * Qsim[1, 1]
+            dN = d + np.random.randn() * Q[0, 0]
+            angleN = angle + np.random.randn() * Q[1, 1]
 
             zN_i = np.array([dN, angleN, i]).reshape(3, 1) # observe landmark
             zN = np.hstack((zN, zN_i)) # zN = [[dN_0, dN_1, ... , dN_N], [angleN_0, angleN_1, ... , angleN_N], [0, 1, ... ,N]]
@@ -375,8 +375,6 @@ def main():
     # Creat particle instance [P_0, P_1, ... , P_M]
     particles = [Particle(LM_NUM) for i in range(PARTICLE_NUM)]
 
-    plt.figure(figsize=(10, 10))
-
     while step <= MAX_STEP:
         step += 1
         time += DT
@@ -387,7 +385,7 @@ def main():
 
         zN = observation(xTrue, LM_list) # observation
 
-        particles = fast_slam1(particles, uN, zN)
+        particles = fast_slam1(particles, u, zN)
 
         xSlam = calc_final_state(particles)
 
@@ -409,6 +407,7 @@ def main():
             plt.plot(hxTrue[0, :], hxTrue[1, :], "-b")
             plt.plot(hxDead[0, :], hxDead[1, :], "-k")
             plt.plot(hxSlam[0, :], hxSlam[1, :], "-r")
+            plt.plot(xTrue[0], xTrue[1], ".b")
             plt.plot(xSlam[0], xSlam[1], "xk")
             plt.axis("equal")
             plt.grid(True)
