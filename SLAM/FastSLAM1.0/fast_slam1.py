@@ -295,8 +295,8 @@ def calc_input(time):
 		v = 0.0
 		yawrate = 0.0
 	else:
-		v = 1.0		# v[m/s]
-		yawrate = 0.1		# w[rad/s]
+		v = np.random.rand()		# v[m/s]
+		yawrate = np.random.randn() 		# w[rad/s]
 
 	u = np.array([v, yawrate]).reshape(2, 1)
 
