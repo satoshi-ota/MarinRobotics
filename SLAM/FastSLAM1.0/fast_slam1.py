@@ -8,8 +8,8 @@ import math
 import matplotlib.pyplot as plt
 
 # Fast SLAM covariance
-Q = np.diag([2.0, np.deg2rad(10.0)])**2
-R = np.diag([1.0, np.deg2rad(20.0)])**2
+Q = np.diag([0.2, np.deg2rad(8.0)])**2
+R = np.diag([0.4, np.deg2rad(15.0)])**2
 
 OFFSET_YAWRATE_NOISE = 0.01
 
@@ -20,7 +20,7 @@ MAX_RANGE = 20.0	# maximum observation range
 STATE_SIZE = 3 # Robot state(x, y, yaw)
 LM_SIZE = 2 # Land mark(x, y)
 PARTICLE_NUM = 100 # Nuber of particles
-NTH = PARTICLE_NUM / 1.5  # Number of particle for re-sampling
+NTH = PARTICLE_NUM / 8.0  # Number of particle for re-sampling
 
 show_animation = True
 
@@ -50,7 +50,6 @@ def move(xTrue, xDead, u):
     # add noise to input
     uN_v = u[0, 0] + np.random.randn() * R[0, 0]
     uN_w = u[1, 0] + np.random.randn() * R[1, 1] + OFFSET_YAWRATE_NOISE
-
     uN = np.array([uN_v, uN_w]).reshape(2, 1)
 
     # calculate deadreconing
@@ -58,9 +57,9 @@ def move(xTrue, xDead, u):
 
     return xTrue, xDead, uN
 
-def fast_slam1(particles, uN, zN):
+def fast_slam1(particles, u, zN):
 
-    particles = predict_particles(particles, uN) # estimate particles position from input
+    particles = predict_particles(particles, u) # estimate particles position from input
 
     particles = update_with_observation(particles, zN) #update with observation
 
@@ -102,7 +101,7 @@ def calc_final_state(particles):
     return xSlam
 
 
-def predict_particles(particles, uN):
+def predict_particles(particles, u):
 
     # calculate particles positions
     for i in range(PARTICLE_NUM):
@@ -112,7 +111,10 @@ def predict_particles(particles, uN):
         xTemp[1, 0] = particles[i].y
         xTemp[2, 0] = particles[i].yaw
 
-        #uN = uN + (np.random.randn(1, 2) @ R).T # add noise
+        uN_v = u[0, 0] + np.random.randn() * R[0, 0]
+        uN_w = u[1, 0] + np.random.randn() * R[1, 1] + OFFSET_YAWRATE_NOISE
+        uN = np.array([uN_v, uN_w]).reshape(2, 1)
+        #uN = u + (np.random.randn(1, 2) @ R).T # add noise
         xTemp = motion_model(xTemp, uN) # calculate particle position from motion model
 
         particles[i].x = xTemp[0, 0]
@@ -263,6 +265,7 @@ def resampling(particles):
     # print(Neff)
 
     if Neff < NTH:  # resampling
+        print("resampling")
         wcum = np.cumsum(pw)
         base = np.cumsum(pw * 0.0 + 1 / PARTICLE_NUM) - 1 / PARTICLE_NUM
         resampleid = base + np.random.rand(base.shape[0]) / PARTICLE_NUM
@@ -382,7 +385,7 @@ def main():
 
         zN = observation(xTrue, LM_list) # observation
 
-        particles = fast_slam1(particles, uN, zN)
+        particles = fast_slam1(particles, u, zN)
 
         xSlam = calc_final_state(particles)
 
@@ -398,13 +401,13 @@ def main():
             plt.plot(LM_list[:, 0], LM_list[:, 1], "*k")
 
             for i in range(PARTICLE_NUM):
-                plt.plot(particles[i].x, particles[i].y, ".r")
+                plt.plot(particles[i].x, particles[i].y, ".", c = "#5EC84E")
                 plt.plot(particles[i].lm[:, 0], particles[i].lm[:, 1], "xb")
 
             plt.plot(hxTrue[0, :], hxTrue[1, :], "-b")
             plt.plot(hxDead[0, :], hxDead[1, :], "-k")
             plt.plot(hxSlam[0, :], hxSlam[1, :], "-r")
-            plt.plot(xSlam[0], xSlam[1], "Xk")
+            plt.plot(xSlam[0], xSlam[1], "xk")
             plt.axis("equal")
             plt.grid(True)
             plt.pause(0.0001)
