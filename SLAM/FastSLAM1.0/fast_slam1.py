@@ -8,8 +8,8 @@ import math
 import matplotlib.pyplot as plt
 
 # Fast SLAM covariance
-Q = np.diag([0.3, np.deg2rad(4.0)])**2
-R = np.diag([0.1, np.deg2rad(8.0)])**2
+Q = np.diag([2.0, np.deg2rad(10.0)])**2
+R = np.diag([1.0, np.deg2rad(20.0)])**2
 
 OFFSET_YAWRATE_NOISE = 0.01
 
@@ -20,7 +20,7 @@ MAX_RANGE = 20.0	# maximum observation range
 STATE_SIZE = 3 # Robot state(x, y, yaw)
 LM_SIZE = 2 # Land mark(x, y)
 PARTICLE_NUM = 100 # Nuber of particles
-NTH = PARTICLE_NUM / 2.0  # Number of particle for re-sampling
+NTH = PARTICLE_NUM / 1.5  # Number of particle for re-sampling
 
 show_animation = True
 
@@ -48,8 +48,8 @@ def move(xTrue, xDead, u):
     xTrue = motion_model(xTrue, u)
 
     # add noise to input
-    uN_v = u[0, 0] + np.random.randn() * Rsim[0, 0]
-    uN_w = u[1, 0] + np.random.randn() * Rsim[1, 1] + OFFSET_YAWRATE_NOISE
+    uN_v = u[0, 0] + np.random.randn() * R[0, 0]
+    uN_w = u[1, 0] + np.random.randn() * R[1, 1] + OFFSET_YAWRATE_NOISE
 
     uN = np.array([uN_v, uN_w]).reshape(2, 1)
 
@@ -112,7 +112,7 @@ def predict_particles(particles, uN):
         xTemp[1, 0] = particles[i].y
         xTemp[2, 0] = particles[i].yaw
 
-        uN = uN + (np.random.randn(1, 2) @ R).T # add noise
+        #uN = uN + (np.random.randn(1, 2) @ R).T # add noise
         xTemp = motion_model(xTemp, uN) # calculate particle position from motion model
 
         particles[i].x = xTemp[0, 0]
@@ -312,8 +312,8 @@ def observation(xTrue, LM_list):
         angle = pi_2_pi(math.atan2(dy, dx) - xTrue[2, 0]) # angle for landmark
 
         if d <= MAX_RANGE:
-            dN = d + np.random.randn() * Qsim[0, 0]
-            angleN = angle + np.random.randn() * Qsim[1, 1]
+            dN = d + np.random.randn() * Q[0, 0]
+            angleN = angle + np.random.randn() * Q[1, 1]
 
             zN_i = np.array([dN, angleN, i]).reshape(3, 1) # observe landmark
             zN = np.hstack((zN, zN_i)) # zN = [[dN_0, dN_1, ... , dN_N], [angleN_0, angleN_1, ... , angleN_N], [0, 1, ... ,N]]
