@@ -8,10 +8,10 @@ import math
 import matplotlib.pyplot as plt
 
 # Fast SLAM covariance
-Q = np.diag([0.2, np.deg2rad(8.0)])**2
-R = np.diag([0.4, np.deg2rad(15.0)])**2
+Q = np.diag([0.4, np.deg2rad(5.0)])**2
+R = np.diag([0.8, np.deg2rad(10.0)])**2
 
-OFFSET_YAWRATE_NOISE = 0.01
+OFFSET_YAWRATE_NOISE = 0.005
 
 DT = 0.1	# time delta
 MAX_STEP = 1000 	# maximum step
@@ -19,8 +19,8 @@ SIM_TIME = 20.0	# simulation time
 MAX_RANGE = 20.0	# maximum observation range
 STATE_SIZE = 3 # Robot state(x, y, yaw)
 LM_SIZE = 2 # Land mark(x, y)
-PARTICLE_NUM = 100 # Nuber of particles
-NTH = PARTICLE_NUM / 8.0  # Number of particle for re-sampling
+PARTICLE_NUM = 120 # Nuber of particles
+NTH = PARTICLE_NUM / 10.0  # Number of particle for re-sampling
 
 show_animation = True
 
@@ -407,6 +407,7 @@ def main():
             plt.plot(hxTrue[0, :], hxTrue[1, :], "-b")
             plt.plot(hxDead[0, :], hxDead[1, :], "-k")
             plt.plot(hxSlam[0, :], hxSlam[1, :], "-r")
+            plt.plot(xTrue[0], xTrue[1], ".b")
             plt.plot(xSlam[0], xSlam[1], "xk")
             plt.axis("equal")
             plt.grid(True)
