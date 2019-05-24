@@ -14,7 +14,7 @@ R = np.diag([0.8, np.deg2rad(10.0)])**2
 OFFSET_YAWRATE_NOISE = 0.005
 
 DT = 0.1	# time delta
-MAX_STEP = 1000 	# maximum step
+MAX_STEP = 5000 	# maximum step
 SIM_TIME = 20.0	# simulation time
 MAX_RANGE = 20.0	# maximum observation range
 STATE_SIZE = 3 # Robot state(x, y, yaw)
@@ -296,7 +296,7 @@ def calc_input(time):
 		yawrate = 0.0
 	else:
 		v = np.random.rand()		# v[m/s]
-		yawrate = np.random.randn()		# w[rad/s]
+		yawrate = np.random.randn() * 2.0		# w[rad/s]
 
 	u = np.array([v, yawrate]).reshape(2, 1)
 
