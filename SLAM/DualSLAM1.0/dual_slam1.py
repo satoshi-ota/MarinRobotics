@@ -8,16 +8,17 @@ import math
 import matplotlib.pyplot as plt
 
 # Fast SLAM covariance
-Q = np.diag([0.3, np.deg2rad(4.0)])**2
-R = np.diag([0.1, np.deg2rad(8.0)])**2
+Q1 = np.diag([0.3, np.deg2rad(4.0)])**2
+R1 = np.diag([0.1, np.deg2rad(8.0)])**2
+OFFSET_YAWRATE_NOISE1 = 0.01
 
 #  Simulation parameter
-Qsim = np.diag([0.3, np.deg2rad(2.0)])**2
-Rsim = np.diag([0.5, np.deg2rad(10.0)])**2
-OFFSET_YAWRATE_NOISE = 0.01
+Q2 = np.diag([0.3, np.deg2rad(2.0)])**2
+R2 = np.diag([0.5, np.deg2rad(10.0)])**2
+OFFSET_YAWRATE_NOISE2 = 0.01
 
 DT = 0.1	# time delta
-MAX_STEP = 1000 	# maximum step
+MAX_STEP = 3000 	# maximum step
 SIM_TIME = 20.0	# simulation time
 MAX_RANGE = 20.0	# maximum observation range
 STATE_SIZE = 3 # Robot state(x, y, yaw)
@@ -26,6 +27,16 @@ PARTICLE_NUM = 100 # Nuber of particles
 NTH = PARTICLE_NUM / 2.0  # Number of particle for re-sampling
 
 show_animation = True
+
+class Robot:
+
+    def __init__(self):
+    
+        self.xSlam = np.zeros((STATE_SIZE, 1)) # Estimate with fast_slam1.0
+        self.xDead = np.zeros((STATE_SIZE, 1)) # Estimate with deadreconing
+        self.xTrue = np.zeros((STATE_SIZE, 1)) # True position
+
+
 
 class Particle:
 
