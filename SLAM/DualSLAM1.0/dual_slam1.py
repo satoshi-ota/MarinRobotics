@@ -32,28 +32,57 @@ class Robot:
 
     def __init__(self):
     
+        # Creat particle instance [P_0, P_1, ... , P_M]
+        self.particles = [Particle(LM_NUM) for i in range(PARTICLE_NUM)]
+
         self.xSlam = np.zeros((STATE_SIZE, 1)) # Estimate with fast_slam1.0
         self.xDead = np.zeros((STATE_SIZE, 1)) # Estimate with deadreconing
         self.xTrue = np.zeros((STATE_SIZE, 1)) # True position
 
+        # history
+        self.hxSlam = xSlam
+        self.hxDead = xDead
+        self.hxTrue = xTrue
+
+    def pos_initialize(self, xIni):
+
+        # Initialize position
+        self.xSlam = xIni # Estimate with fast_slam1.0
+        self.xDead = xIni # Estimate with deadreconing
+        self.xTrue = xIni # True position
+
+        # Initialize particle position
+        for i in range(PARTICLE_NUM):
+            self.particles[i].x = xIni[0, 0]
+            self.particles[i].y = xIni[1, 0]
+            self.particles[i].yaw = xIni[2, 0]
+
+    def store_history(self, xTrue, xDead, xSlam):
+
+        # store data history
+        self.hxSlam = np.hstack((hxSlam, x_state))
+        self.hxDead = np.hstack((hxDead, xDead))
+        self.hxTrue = np.hstack((hxTrue, xTrue))
+
+    
 
 
 class Particle:
 
     def __init__(self, LM_NUM):
+
         self.w = 1.0 / PARTICLE_NUM
         self.x = 0.0
         self.y = 0.0
         self.yaw = 0.0
-        # landmark x-y positions
-        self.lmPos = np.zeros((LM_NUM, LM_SIZE)) # lmPos = [[lmx_0, lmy_0], [lmx_1, lmy_1], ... ,[lmx_N, lmy_N]]
-        #self.lmStat = np.array((LM_NUM, 1))
-        self.lmStat = np.array([[False], [False], [False], [False], [False], [False], [False], [False]])
-        #self.lmStat[:, 0] = False                # lmStat = [[False], [False], ... ,[False]]
-
+        
+        # another robot x-y positions
+        self.lmPos = np.zeros((1, 2)) # arPos = [[ar_x, ar_y]]
+        self.lmStat = np.array([[False]]) # Find another robot or Not
         self.lm = np.hstack((self.lmPos, self.lmStat))
+        
         # landmark position covariance
-        self.lmP = np.zeros((LM_NUM * LM_SIZE, LM_SIZE))
+        self.lmP = np.zeros((LM_SIZE, LM_SIZE))
 
 
 def move(xTrue, xDead, u):
@@ -300,7 +329,7 @@ def resampling(particles):
     return particles
 
 
-def calc_input(time):
+def calc_input1(time):
 
 	if time <= 1.0:	# wait at first
 		v = 0.0
@@ -313,6 +342,18 @@ def calc_input(time):
 
 	return u
 
+def calc_input2(time):
+
+	if time <= 1.0:	# wait at first
+		v = 0.0
+		yawrate = 0.0
+	else:
+		v = 1.0		# v[m/s]
+		yawrate = 0.1		# w[rad/s]
+
+	u = np.array([v, yawrate]).reshape(2, 1)
+
+	return u
 
 def observation(xTrue, LM_list):
 
@@ -360,9 +401,13 @@ def pi_2_pi(angle):
 def main():
     print("running...")
 
+    r1 = Robot()    # instance robot1
+    r2 = Robot()    # instance robot2
+
     time = 0.0;
     step = 0;
 
+'''
     LM_list = np.array([[10.0, -2.0],
                         [15.0, 10.0],
                         [15.0, 15.0],
@@ -373,39 +418,28 @@ def main():
                         [-10.0, 15.0]])
 
     LM_NUM = LM_list.shape[0]
-
-    xSlam = np.zeros((STATE_SIZE, 1)) # Estimate with fast_slam1.0
-    xDead = np.zeros((STATE_SIZE, 1)) # Estimate with deadreconing
-    xTrue = np.zeros((STATE_SIZE, 1)) # True position
-
-	# history
-    hxSlam = xSlam
-    hxDead = xDead
-    hxTrue = xTrue
-
-    # Creat particle instance [P_0, P_1, ... , P_M]
-    particles = [Particle(LM_NUM) for i in range(PARTICLE_NUM)]
+'''
 
     while step <= MAX_STEP:
         step += 1
         time += DT
 
-        u = calc_input(time)
+        u1 = calc_input1(time)
+        u2 = calc_input2(time)
 
-        xTrue, xDead, uN = move(xTrue, xDead, u) # move
+        # Robot1
+        r1.xTrue, r1.xDead, uN1 = move(r1.xTrue, r1.xDead, u1) # move robot1
+        zN1 = observation(r1.xTrue, LM_list) # observation robot1
+        r1.particles = fast_slam1(r1.particles, uN1, zN1) # slam robot1
+        r1.xSlam = calc_final_state(r1.particles)
+        x_state = r1.xSlam[0: STATE_SIZE]
 
-        zN = observation(xTrue, LM_list) # observation
-
-        particles = fast_slam1(particles, uN, zN)
-
-        xSlam = calc_final_state(particles)
-
-        x_state = xSlam[0: STATE_SIZE]
-
-        # store data history
-        hxSlam = np.hstack((hxSlam, x_state))
-        hxDead = np.hstack((hxDead, xDead))
-        hxTrue = np.hstack((hxTrue, xTrue))
+        # Robot2
+        r2.xTrue, r2.xDead, uN2 = move(r2.xTrue, r21.xDead, u) # move robot2
+        zN2 = observation(r2.xTrue, LM_list) # observation robot2
+        r2.particles = fast_slam1(r2.particles, uN2, zN2) # slam robot2
+        r2.xSlam = calc_final_state(r2.particles)
+        x_state = r1.xSlam[0: STATE_SIZE]
 
         if show_animation:  # pragma: no cover
             plt.cla()
