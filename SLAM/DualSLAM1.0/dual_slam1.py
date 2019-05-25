@@ -30,32 +30,36 @@ show_animation = True
 
 class Robot:
 
-    def __init__(self):
-    
-        # Creat particle instance [P_0, P_1, ... , P_M]
-        self.particles = [Particle(LM_NUM) for i in range(PARTICLE_NUM)]
+    def __init__(self, xIni, Q, R):
+
+        # Creat particle
+        self.particles = [Particle() for i in range(PARTICLE_NUM)]
+        # Initialize particle position
+        for i in range(PARTICLE_NUM):
+            self.particles[i].x = xIni[0, 0]
+            self.particles[i].y = xIni[1, 0]
+            self.particles[i].yaw = xIni[2, 0]
 
         self.xSlam = np.zeros((STATE_SIZE, 1)) # Estimate with fast_slam1.0
         self.xDead = np.zeros((STATE_SIZE, 1)) # Estimate with deadreconing
         self.xTrue = np.zeros((STATE_SIZE, 1)) # True position
-
-        # history
-        self.hxSlam = xSlam
-        self.hxDead = xDead
-        self.hxTrue = xTrue
-
-    def pos_initialize(self, xIni):
 
         # Initialize position
         self.xSlam = xIni # Estimate with fast_slam1.0
         self.xDead = xIni # Estimate with deadreconing
         self.xTrue = xIni # True position
 
-        # Initialize particle position
-        for i in range(PARTICLE_NUM):
-            self.particles[i].x = xIni[0, 0]
-            self.particles[i].y = xIni[1, 0]
-            self.particles[i].yaw = xIni[2, 0]
+        # History
+        self.hxSlam = self.xSlam
+        self.hxDead = self.xDead
+        self.hxTrue = self.xTrue
+
+        # Set covariance
+        self.Q = Q
+        self.R = R
+
+        # Initialize observation
+        self.z = np.zeros((3, 0))
 
     def store_history(self, xTrue, xDead, xSlam):
 
@@ -64,23 +68,116 @@ class Robot:
         self.hxDead = np.hstack((hxDead, xDead))
         self.hxTrue = np.hstack((hxTrue, xTrue))
 
-    
+    def action(self, u):
+
+        # Compute True positions
+        self.xTrue = motion_model(self.xTrue, u)
+
+        # Add noise to input
+        uReal_v = u[0, 0] + np.random.randn() * self.R[0, 0]
+        uReal_w = u[1, 0] + np.random.randn() * self.R[1, 1] + OFFSET_YAWRATE_NOISE
+        uReal = np.array([uReal_v, uReal_w]).reshape(2, 1)
+
+        # Compute deadreconing
+        self.xDead = motion_model(self.xDead, uReal)
+
+    def observation(self, AxTrue):
+
+        # Compute another robot positions
+        dx = AxTrue[0, 0] - self.xTrue[0, 0]
+        dy = AxTrue[1, 0] - self.xTrue[1, 0]
+
+        d = math.sqrt(dx**2 + dy**2) # Distanse between particle and another robot
+        angle = pi_2_pi(math.atan2(dy, dx) - self.xTrue[2, 0]) # Angle for landmark
+
+        if d <= MAX_RANGE:
+            # Add noise to observation
+            dReal = d + np.random.randn() * self.Q[0, 0]
+            angleReal = angle + np.random.randn() * self.Q[1, 1]
+            self.z = np.array([dReal, angleReal]).reshape(2, 1) # Observe another robot
+
+    def fast_slam(self, u):
+        self.predict_particles(u)      # Estimate particles position from input
+        self.update_with_observation() # Update with observation
+        self.resampling()              # Resampling with weight
+
+    def predict_particles(self, u):
+
+        # calculate particles positions
+        for i in range(PARTICLE_NUM):
+            xTemp = np.zeros((STATE_SIZE, 1))
+
+            xTemp[0, 0] = self.particles[i].x
+            xTemp[1, 0] = self.particles[i].y
+            xTemp[2, 0] = self.particles[i].yaw
+
+            uN = u + (np.random.randn(1, 2) @ self.R).T # add noise
+            xTemp = motion_model(xTemp, uN) # calculate particle position from motion model
+
+            self.particles[i].x = xTemp[0, 0]
+            self.particles[i].y = xTemp[1, 0]
+            self.particles[i].yaw = xTemp[2, 0]
+
+    def update_with_observation(self):
+
+        # Update with observation
+        for i in range(PARTICLE_NUM):
+            # New landmark
+            if self.particles[i].lm[0, 2] == False:
+                self.particles[i] = self.add_new_lm()
+            # Known landmark
+            else:
+                w = compute_weight(self.particles[i], self.z, self.Q)
+                self.particles[i].w *= w
+                self.particles[i] = self.update_landmark(self.particles[i], self.z, self.Q)
+
+    def add_new_lm(self):
+
+        # extract observation data
+        r = self.z[0]
+        b = self.z[1]
+
+        # calculate landmark position
+        s = math.sin(pi_2_pi(self.particle.yaw + b))
+        c = math.cos(pi_2_pi(self.particle.yaw + b))
+
+        # update landmark state
+        self.particle.lm[lm_id, 0] = particle.x + r * c
+        self.particle.lm[lm_id, 1] = particle.y + r * s
+        self.particle.lm[lm_id, 2] = True
+
+        # calculate Jacobian
+        dx = self.particle.lm[lm_id, 0] - self.particle.x
+        dy = self.particle.lm[lm_id, 1] - self.particle.y
+        q = dx**2 + dy**2
+        d = math.sqrt(q)
+
+        H = np.array([[ dx / d, dy / d],
+                      [-dy / q, dx / q]])
+
+        # initialize covariance
+        HInv = np.linalg.inv(H)
+        particle.lmP[lm_id * 2 : (lm_id + 1) * 2] = HInv @ Q @ HInv.T
+
+        return particle
+
+
 
 
 class Particle:
 
-    def __init__(self, LM_NUM):
+    def __init__(self):
 
         self.w = 1.0 / PARTICLE_NUM
         self.x = 0.0
         self.y = 0.0
         self.yaw = 0.0
-        
+
         # another robot x-y positions
         self.lmPos = np.zeros((1, 2)) # arPos = [[ar_x, ar_y]]
         self.lmStat = np.array([[False]]) # Find another robot or Not
         self.lm = np.hstack((self.lmPos, self.lmStat))
-        
+
         # landmark position covariance
         self.lmP = np.zeros((LM_SIZE, LM_SIZE))
 
@@ -93,7 +190,6 @@ def action(xTrue, xDead, u):
     # add noise to input
     uN_v = u[0, 0] + np.random.randn() * Rsim[0, 0]
     uN_w = u[1, 0] + np.random.randn() * Rsim[1, 1] + OFFSET_YAWRATE_NOISE
-
     uN = np.array([uN_v, uN_w]).reshape(2, 1)
 
     # calculate deadreconing
@@ -101,9 +197,9 @@ def action(xTrue, xDead, u):
 
     return xTrue, xDead
 
-def fast_slam1(particles, uN, zN):
+def fast_slam(particles, u, zN):
 
-    particles = predict_particles(particles, uN) # estimate particles position from input
+    particles = predict_particles(particles, u) # estimate particles position from input
 
     particles = update_with_observation(particles, zN) #update with observation
 
@@ -145,7 +241,7 @@ def calc_final_state(particles):
     return xSlam
 
 
-def predict_particles(particles, uN):
+def predict_particles(particles, u):
 
     # calculate particles positions
     for i in range(PARTICLE_NUM):
@@ -155,7 +251,7 @@ def predict_particles(particles, uN):
         xTemp[1, 0] = particles[i].y
         xTemp[2, 0] = particles[i].yaw
 
-        uN = uN + (np.random.randn(1, 2) @ R).T # add noise
+        uN = u + (np.random.randn(1, 2) @ R1).T # add noise
         xTemp = motion_model(xTemp, uN) # calculate particle position from motion model
 
         particles[i].x = xTemp[0, 0]
@@ -270,21 +366,15 @@ def update_with_EKF(lmx, lmP, dz, H, Q):
 def update_with_observation(particles, zN):
 
     #update with observation
-    for iz in range(len(zN[0, :])):
-
-        lmid = int(zN[2, iz])
-
-        for ip in range(PARTICLE_NUM):
-
-            # new landmark
-            if particles[ip].lm[lmid, 2] == False:
-                particles[ip] = add_new_lm(particles[ip], zN[:, iz], Q)
-            # known landmark
-            else:
-                w = compute_weight(particles[ip], zN[:, iz], Q)
-                particles[ip].w *= w
-                particles[ip] = update_landmark(particles[ip], zN[:, iz], Q)
-                #print("update")
+    for ip in range(PARTICLE_NUM):
+        # new landmark
+        if particles[ip].lm[0, 2] == False:
+            particles[ip] = add_new_lm(particles[ip], zN, Q)
+        # known landmark
+        else:
+            w = compute_weight(particles[ip], zN, Q)
+            particles[ip].w *= w
+            particles[ip] = update_landmark(particles[ip], zN, Q)
 
     return particles
 
@@ -355,23 +445,21 @@ def calc_input2(time):
 
 	return u
 
-def observation(xTrue, LM_list):
+def observation(xTrue, xLm):
 
     # calculate landmark positions
     zN = np.zeros((3, 0))
-    for i in range(len(LM_list[:, 0])):
-        dx = LM_list[i, 0] - xTrue[0, 0]
-        dy = LM_list[i, 1] - xTrue[1, 0]
+    dx = xLm[0, 0] - xTrue[0, 0]
+    dy = xLm[1, 0] - xTrue[1, 0]
 
-        d = math.sqrt(dx**2 + dy**2) # distanse to landmark
-        angle = pi_2_pi(math.atan2(dy, dx) - xTrue[2, 0]) # angle for landmark
+    d = math.sqrt(dx**2 + dy**2) # distanse to landmark
+    angle = pi_2_pi(math.atan2(dy, dx) - xTrue[2, 0]) # angle for landmark
 
-        if d <= MAX_RANGE:
-            dN = d + np.random.randn() * Qsim[0, 0]
-            angleN = angle + np.random.randn() * Qsim[1, 1]
+    if d <= MAX_RANGE:
+        dN = d + np.random.randn() * Q1[0, 0]
+        angleN = angle + np.random.randn() * Q1[1, 1]
 
-            zN_i = np.array([dN, angleN, i]).reshape(3, 1) # observe landmark
-            zN = np.hstack((zN, zN_i)) # zN = [[dN_0, dN_1, ... , dN_N], [angleN_0, angleN_1, ... , angleN_N], [0, 1, ... ,N]]
+        zN = np.array([dN, angleN]).reshape(2, 1) # observe another robot
 
     return zN
 
@@ -401,12 +489,12 @@ def pi_2_pi(angle):
 def main():
     print("running...")
 
-    r1 = Robot()    # instance robot1
-    r2 = Robot()    # instance robot2
+    # Start Position
+    xIni1 = np.array([0.0,  1.0, 0.0]).reshape(3, 1)
+    xIni2 = np.array([0.0, -1.0, 0.0]).reshape(3, 1)
 
-    # Initialize Robot Postion
-    r1.pos_initialize(0.0,  1.0)
-    r2.pos_initialize(0.0, -1.0)
+    r1 = Robot(xIni1, Q1, R1)    # instance robot1
+    r2 = Robot(xIni2, Q2, R2)    # instance robot2
 
     time = 0.0;
     step = 0;
@@ -432,16 +520,16 @@ def main():
         u2 = calc_input2(time)
 
         # Robot1
-        r1.xTrue, r1.xDead = action(r1.xTrue, r1.xDead, u1) # move robot1
-        zN1 = observation(r1.xTrue, r2.xSlam) # observation robot1
-        r1.particles = fast_slam1(r1.particles, uN1, zN1) # slam robot1
+        r1.action(u1) # move robot1
+        r1.observation(r2.xTrue) # observation robot1
+        r1.particles = fast_slam(r1.particles, u1, zN1) # slam robot1
         r1.xSlam = calc_final_state(r1.particles)
         x_state1 = r1.xSlam[0: STATE_SIZE]
 
         # Robot2
         r2.xTrue, r2.xDead = action(r2.xTrue, r21.xDead, u) # move robot2
-        zN2 = observation(r2.xTrue, r1.xSlam) # observation robot2
-        r2.particles = fast_slam1(r2.particles, uN2, zN2) # slam robot2
+        zN2 = observation(r2.xTrue, r1.xTrue) # observation robot2
+        r2.particles = fast_slam(r2.particles, uN2, zN2) # slam robot2
         r2.xSlam = calc_final_state(r2.particles)
         x_state2 = r1.xSlam[0: STATE_SIZE]
 
