@@ -30,7 +30,7 @@ show_animation = True
 
 class Robot:
 
-    def __init__(self, xIni, Q, R):
+    def __init__(self, xIni, Q, R, yawNoise):
 
         # Creat particle
         self.particles = [Particle() for i in range(PARTICLE_NUM)]
@@ -61,6 +61,9 @@ class Robot:
         # Initialize observation
         self.z = np.zeros((3, 0))
 
+        # Yawrate noise
+        self.yawNoise = yawNoise
+
     def store_history(self, xTrue, xDead, xSlam):
 
         # store data history
@@ -75,7 +78,7 @@ class Robot:
 
         # Add noise to input
         uReal_v = u[0, 0] + np.random.randn() * self.R[0, 0]
-        uReal_w = u[1, 0] + np.random.randn() * self.R[1, 1] + OFFSET_YAWRATE_NOISE
+        uReal_w = u[1, 0] + np.random.randn() * self.R[1, 1] + self.yawNoise
         uReal = np.array([uReal_v, uReal_w]).reshape(2, 1)
 
         # Compute deadreconing
@@ -111,8 +114,8 @@ class Robot:
             xTemp[1, 0] = self.particles[i].y
             xTemp[2, 0] = self.particles[i].yaw
 
-            uN = u + (np.random.randn(1, 2) @ self.R).T # add noise
-            xTemp = motion_model(xTemp, uN) # calculate particle position from motion model
+            uReal = u + (np.random.randn(1, 2) @ self.R).T # add noise
+            xTemp = motion_model(xTemp, uReal) # calculate particle position from motion model
 
             self.particles[i].x = xTemp[0, 0]
             self.particles[i].y = xTemp[1, 0]
@@ -124,43 +127,172 @@ class Robot:
         for i in range(PARTICLE_NUM):
             # New landmark
             if self.particles[i].lm[0, 2] == False:
-                self.particles[i] = self.add_new_lm()
+                self.particles[i] = self.add_new_lm(self.particles[i])
             # Known landmark
             else:
-                w = compute_weight(self.particles[i], self.z, self.Q)
-                self.particles[i].w *= w
-                self.particles[i] = self.update_landmark(self.particles[i], self.z, self.Q)
+                self.particles[i] = self.update_landmark(self.particles[i])
 
-    def add_new_lm(self):
+    def add_new_lm(self, particle):
 
         # extract observation data
         r = self.z[0]
         b = self.z[1]
 
         # calculate landmark position
-        s = math.sin(pi_2_pi(self.particle.yaw + b))
-        c = math.cos(pi_2_pi(self.particle.yaw + b))
+        s = math.sin(pi_2_pi(particle.yaw + b))
+        c = math.cos(pi_2_pi(particle.yaw + b))
 
         # update landmark state
-        self.particle.lm[lm_id, 0] = particle.x + r * c
-        self.particle.lm[lm_id, 1] = particle.y + r * s
-        self.particle.lm[lm_id, 2] = True
+        particle.lm[0, 0] = particle.x + r * c
+        particle.lm[0, 1] = particle.y + r * s
+        particle.lm[0, 2] = True
 
         # calculate Jacobian
-        dx = self.particle.lm[lm_id, 0] - self.particle.x
-        dy = self.particle.lm[lm_id, 1] - self.particle.y
+        dx = particle.lm[0, 0] - particle.x
+        dy = particle.lm[0, 1] - particle.y
         q = dx**2 + dy**2
         d = math.sqrt(q)
 
         H = np.array([[ dx / d, dy / d],
                       [-dy / q, dx / q]])
 
-        # initialize covariance
+        # Initialize covariance
         HInv = np.linalg.inv(H)
-        particle.lmP[lm_id * 2 : (lm_id + 1) * 2] = HInv @ Q @ HInv.T
+        particle.lmP = HInv @ self.Q @ HInv.T
 
         return particle
 
+    def update_landmark(self, particle):
+
+        # Compute Delta
+        lmx = np.array(particle.lm[0, 0:2]).reshape(2, 1) # (lm_x[t-1], lm_y[t-1])
+        lmP = particle.lmP # covariance[t-1]
+
+        dx = lmx[0, 0] - particle.x
+        dy = lmx[1, 0] - particle.y
+
+        # Update landmark
+        dz = self.creat_inovation_vector(particle, dx, dy)
+        H = self.compute_jacobian(dx, dy)
+
+        # Update Observation Covariance
+        Qt = H @ lmP @ H.T + self.Q
+        QtInv = np.linalg.inv(Qt)
+
+        # Update weight
+        w = self.compute_weight(dz, Qt, QtInv)
+        particle.w *= w
+
+        # Update EKF
+        lmx, lmP = self.update_EKF(lmx, lmP, dz, H, Qt, QtInv)
+
+        particle.lm[0, 0:2] = lmx.T
+        particle.lmP = lmP
+
+        return particle
+
+    def creat_inovation_vector(self, particle, dx, dy):
+
+        q = dx**2 + dy**2
+        d = math.sqrt(q)
+        # Compute Inovation Vector
+        zHat = np.array([d, math.atan2(dy, dx) - particle.yaw]).reshape(2, 1)
+        zHat[1, 0] = pi_2_pi(zHat[1, 0])
+        dz = self.z[0:2].reshape(2, 1) - zHat
+        dz[1, 0] = pi_2_pi(dz[1, 0])
+
+        return dz
+
+    def compute_jacobian(self, dx, dy):
+
+        q = dx**2 + dy**2
+        d = math.sqrt(q)
+
+        H = np.array([[ dx / d, dy / d],
+                      [-dy / q, dx / q]])
+
+        return H
+
+    def compute_weight(self, dz, Qt, QtInv):
+
+        # Compute particle weight
+        num = math.exp(-0.5 * dz.T @ QtInv @ dz)
+        den = 2 * math.pi * math.sqrt(np.linalg.det(Qt))
+        w = num / den
+
+        return w
+
+    def update_EKF(self, lmx, lmP, dz, H, Qt, QtInv):
+
+        # Compute Kalman Gain
+        Kt = lmP @ H.T @ QtInv
+
+        # Update
+        lmx = lmx + Kt @ dz
+        lmP = (np.eye(LM_SIZE) - (Kt @ H)) @ lmP
+
+        return lmx, lmP
+
+    def resampling(self):
+
+        self.particles = self.normalize_weight()
+
+        pw = []
+        for i in range(PARTICLE_NUM):
+            pw.append(self.particles[i].w)
+
+        pw = np.array(pw)
+
+        Neff = 1.0 / (pw @ pw.T)  # Effective particle number
+        # print(Neff)
+
+        if Neff < NTH:  # resampling
+            wcum = np.cumsum(pw)
+            base = np.cumsum(pw * 0.0 + 1 / PARTICLE_NUM) - 1 / PARTICLE_NUM
+            resampleid = base + np.random.rand(base.shape[0]) / PARTICLE_NUM
+
+            inds = []
+            ind = 0
+            for ip in range(PARTICLE_NUM):
+                while ((ind < wcum.shape[0] - 1) and (resampleid[ip] > wcum[ind])):
+                    ind += 1
+                inds.append(ind)
+
+            tparticles = self.particles[:]
+            for i in range(len(inds)):
+                self.particles[i].x = tparticles[inds[i]].x
+                self.particles[i].y = tparticles[inds[i]].y
+                self.particles[i].yaw = tparticles[inds[i]].yaw
+                self.particles[i].lm = tparticles[inds[i]].lm[:, :]
+                self.particles[i].lmP = tparticles[inds[i]].lmP[:, :]
+                self.particles[i].w = 1.0 / PARTICLE_NUM
+
+    def normalize_weight(self):
+
+        sumw = sum([p.w for p in self.particles])
+
+        try:
+            for i in range(PARTICLE_NUM):
+                self.particles[i].w /= sumw
+        except ZeroDivisionError:
+            for i in range(PARTICLE_NUM):
+                self.particles[i].w = 1.0 / PARTICLE_NUM
+
+            return self.particles
+
+        return self.particles
+
+    def calc_final_state(self):
+
+        self.xSlam = np.zeros((STATE_SIZE, 1))
+        self.particles = self.normalize_weight()
+
+        for i in range(PARTICLE_NUM):
+            self.xSlam[0, 0] += self.particles[i].w * self.particles[i].x
+            self.xSlam[1, 0] += self.particles[i].w * self.particles[i].y
+            self.xSlam[2, 0] += self.particles[i].w * self.particles[i].yaw
+
+        self.xSlam[2, 0] = pi_2_pi(self.xSlam[2, 0])
 
 
 
@@ -493,24 +625,11 @@ def main():
     xIni1 = np.array([0.0,  1.0, 0.0]).reshape(3, 1)
     xIni2 = np.array([0.0, -1.0, 0.0]).reshape(3, 1)
 
-    r1 = Robot(xIni1, Q1, R1)    # instance robot1
-    r2 = Robot(xIni2, Q2, R2)    # instance robot2
+    r1 = Robot(xIni1, Q1, R1, OFFSET_YAWRATE_NOISE1)    # instance robot1
+    r2 = Robot(xIni2, Q2, R2, OFFSET_YAWRATE_NOISE2)    # instance robot2
 
     time = 0.0;
     step = 0;
-
-'''
-    LM_list = np.array([[10.0, -2.0],
-                        [15.0, 10.0],
-                        [15.0, 15.0],
-                        [10.0, 20.0],
-                        [3.0, 15.0],
-                        [-5.0, 20.0],
-                        [-5.0, 5.0],
-                        [-10.0, 15.0]])
-
-    LM_NUM = LM_list.shape[0]
-'''
 
     while step <= MAX_STEP:
         step += 1
@@ -520,31 +639,42 @@ def main():
         u2 = calc_input2(time)
 
         # Robot1
-        r1.action(u1) # move robot1
-        r1.observation(r2.xTrue) # observation robot1
-        r1.particles = fast_slam(r1.particles, u1, zN1) # slam robot1
-        r1.xSlam = calc_final_state(r1.particles)
+        r1.action(u1)               # move robot1
+        r1.observation(r2.xTrue)    # observation robot1
+        r1.fast_slam(u1)            # slam robot1
+        r1.calc_final_state()
         x_state1 = r1.xSlam[0: STATE_SIZE]
 
         # Robot2
-        r2.xTrue, r2.xDead = action(r2.xTrue, r21.xDead, u) # move robot2
-        zN2 = observation(r2.xTrue, r1.xTrue) # observation robot2
-        r2.particles = fast_slam(r2.particles, uN2, zN2) # slam robot2
-        r2.xSlam = calc_final_state(r2.particles)
-        x_state2 = r1.xSlam[0: STATE_SIZE]
+        r2.action(u2)               # move robot2
+        r2.observation(r1.xTrue)    # observation robot2
+        r2.fast_slam(u2)            # slam robot2
+        r2.calc_final_state()
+        x_state2 = r2.xSlam[0: STATE_SIZE]
 
         if show_animation:  # pragma: no cover
             plt.cla()
-            plt.plot(LM_list[:, 0], LM_list[:, 1], "*k")
 
             for i in range(PARTICLE_NUM):
-                plt.plot(particles[i].x, particles[i].y, ".r")
-                plt.plot(particles[i].lm[:, 0], particles[i].lm[:, 1], "xb")
+                # Particles1
+                plt.plot(r1.particles[i].x, r1.particles[i].y, ".r")
+                plt.plot(r1.particles[i].lm[:, 0], r1.particles[i].lm[:, 1], "xb")
 
-            plt.plot(hxTrue[0, :], hxTrue[1, :], "-b")
-            plt.plot(hxDead[0, :], hxDead[1, :], "-k")
-            plt.plot(hxSlam[0, :], hxSlam[1, :], "-r")
-            plt.plot(xSlam[0], xSlam[1], "Xk")
+                # Particles2
+                plt.plot(r2.particles[i].x, r2.particles[i].y, ".r")
+                plt.plot(r2.particles[i].lm[:, 0], r2.particles[i].lm[:, 1], "xb")
+
+            # Robot1
+            plt.plot(r1.hxTrue[0, :], r1.hxTrue[1, :], "-b")
+            plt.plot(r1.hxDead[0, :], r1.hxDead[1, :], "-k")
+            plt.plot(r1.hxSlam[0, :], r1.hxSlam[1, :], "-r")
+            plt.plot(r1.xSlam[0], r1.xSlam[1], "Xk")
+            # Robot2
+            plt.plot(r2.hxTrue[0, :], r2.hxTrue[1, :], "-b")
+            plt.plot(r2.hxDead[0, :], r2.hxDead[1, :], "-k")
+            plt.plot(r2.hxSlam[0, :], r2.hxSlam[1, :], "-r")
+            plt.plot(r2.xSlam[0], r2.xSlam[1], "Xk")
+
             plt.axis("equal")
             plt.grid(True)
             plt.pause(0.0001)
