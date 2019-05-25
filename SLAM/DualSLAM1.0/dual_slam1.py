@@ -85,7 +85,7 @@ class Particle:
         self.lmP = np.zeros((LM_SIZE, LM_SIZE))
 
 
-def move(xTrue, xDead, u):
+def action(xTrue, xDead, u):
 
     # calculate True positions
     xTrue = motion_model(xTrue, u)
@@ -99,7 +99,7 @@ def move(xTrue, xDead, u):
     # calculate deadreconing
     xDead = motion_model(xDead, uN)
 
-    return xTrue, xDead, uN
+    return xTrue, xDead
 
 def fast_slam1(particles, uN, zN):
 
@@ -404,6 +404,10 @@ def main():
     r1 = Robot()    # instance robot1
     r2 = Robot()    # instance robot2
 
+    # Initialize Robot Postion
+    r1.pos_initialize(0.0,  1.0)
+    r2.pos_initialize(0.0, -1.0)
+
     time = 0.0;
     step = 0;
 
@@ -428,18 +432,18 @@ def main():
         u2 = calc_input2(time)
 
         # Robot1
-        r1.xTrue, r1.xDead, uN1 = move(r1.xTrue, r1.xDead, u1) # move robot1
-        zN1 = observation(r1.xTrue, LM_list) # observation robot1
+        r1.xTrue, r1.xDead = action(r1.xTrue, r1.xDead, u1) # move robot1
+        zN1 = observation(r1.xTrue, r2.xSlam) # observation robot1
         r1.particles = fast_slam1(r1.particles, uN1, zN1) # slam robot1
         r1.xSlam = calc_final_state(r1.particles)
-        x_state = r1.xSlam[0: STATE_SIZE]
+        x_state1 = r1.xSlam[0: STATE_SIZE]
 
         # Robot2
-        r2.xTrue, r2.xDead, uN2 = move(r2.xTrue, r21.xDead, u) # move robot2
-        zN2 = observation(r2.xTrue, LM_list) # observation robot2
+        r2.xTrue, r2.xDead = action(r2.xTrue, r21.xDead, u) # move robot2
+        zN2 = observation(r2.xTrue, r1.xSlam) # observation robot2
         r2.particles = fast_slam1(r2.particles, uN2, zN2) # slam robot2
         r2.xSlam = calc_final_state(r2.particles)
-        x_state = r1.xSlam[0: STATE_SIZE]
+        x_state2 = r1.xSlam[0: STATE_SIZE]
 
         if show_animation:  # pragma: no cover
             plt.cla()
