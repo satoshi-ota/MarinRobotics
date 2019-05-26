@@ -6,25 +6,26 @@ author: Ota Satoshi
 import numpy as np
 import math
 import matplotlib.pyplot as plt
+import time as TIME
 
 # Fast SLAM covariance
-Q1 = np.diag([0.3, np.deg2rad(3.0)])**2
+Q1 = np.diag([0.3, np.deg2rad(2.0)])**2
 R1 = np.diag([0.1, np.deg2rad(6.0)])**2
 OFFSET_YAWRATE_NOISE1 = 0.01
 
 #  Simulation parameter
-Q2 = np.diag([0.3, np.deg2rad(3.0)])**2
+Q2 = np.diag([0.3, np.deg2rad(2.0)])**2
 R2 = np.diag([0.1, np.deg2rad(6.0)])**2
 OFFSET_YAWRATE_NOISE2 = 0.01
 
 DT = 0.1	# time delta
-MAX_STEP = 3000 	# maximum step
-SIM_TIME = 20.0	# simulation time
+MAX_STEP = 5000 	# maximum step
+SIM_TIME = 200.0	# simulation time
 MAX_RANGE = 20.0	# maximum observation range
 STATE_SIZE = 3 # Robot state(x, y, yaw)
 LM_SIZE = 2 # Land mark(x, y)
-PARTICLE_NUM = 150 # Nuber of particles
-NTH = PARTICLE_NUM / 2.0  # Number of particle for re-sampling
+PARTICLE_NUM = 100 # Nuber of particles
+NTH = PARTICLE_NUM / 5.0  # Number of particle for re-sampling
 
 show_animation = True
 
@@ -100,6 +101,13 @@ class Robot:
             angleReal = angle + np.random.randn() * self.Q[1, 1]
             self.z = np.array([dReal, angleReal]).reshape(2, 1) # Observe another robot
 
+        # DEBUG
+        #r = self.z[0]
+        #b = self.z[1]
+        #s = math.sin(pi_2_pi(self.xTrue[2, 0] + b))
+        #c = math.cos(pi_2_pi(self.xTrue[2, 0] + b))
+        #plt.plot(self.xTrue[0, 0] + r * c, self.xTrue[1, 0] + r * s, "ob")
+
     def fast_slam(self, u):
         self.predict_particles(u)      # Estimate particles position from input
         self.update_with_observation() # Update with observation
@@ -148,6 +156,10 @@ class Robot:
         particle.lm[0, 1] = particle.y + r * s
         particle.lm[0, 2] = True
 
+        # DEBUG
+        #print("Find another Robot")
+        #plt.plot(particle.lm[0, 0], particle.lm[0, 1], "oy")
+
         # Compute Jacobian
         dx = particle.lm[0, 0] - particle.x
         dy = particle.lm[0, 1] - particle.y
@@ -165,9 +177,19 @@ class Robot:
 
     def update_landmark(self, particle):
 
+        # DEBUG
+        r = self.z[0]
+        b = self.z[1]
+        s = math.sin(pi_2_pi(self.xTrue[2, 0] + b))
+        c = math.cos(pi_2_pi(self.xTrue[2, 0] + b))
+        plt.plot(self.xTrue[0, 0] + r * c, self.xTrue[1, 0] + r * s, "ob")
+
         # Compute Delta
-        lmx = np.array(particle.lm[0, 0:2]).reshape(2, 1) # (lm_x[t-1], lm_y[t-1])
+        lmx = particle.lm[0, 0:2].reshape(2, 1) # (lm_x[t-1], lm_y[t-1])
         lmP = particle.lmP # covariance[t-1]
+
+        # DEBUG
+        #plt.plot(lmx[0, 0], lmx[1, 0], "oy")
 
         dx = lmx[0, 0] - particle.x
         dy = lmx[1, 0] - particle.y
@@ -185,10 +207,13 @@ class Robot:
         particle.w *= w
 
         # Update EKF
-        lmx, lmP = self.update_EKF(lmx, lmP, dz, H, Qt, QtInv)
+        lmx, lmP = self.update_EKF(lmx, lmP, dz, H, QtInv)
 
         particle.lm[0, 0:2] = lmx.T
         particle.lmP = lmP
+
+        # DEBUG
+        #plt.plot(lmx[0, 0], lmx[1, 0], "oy")
 
         return particle
 
@@ -223,7 +248,7 @@ class Robot:
 
         return w
 
-    def update_EKF(self, lmx, lmP, dz, H, Qt, QtInv):
+    def update_EKF(self, lmx, lmP, dz, H, QtInv):
 
         # Compute Kalman Gain
         Kt = lmP @ H.T @ QtInv
@@ -248,6 +273,7 @@ class Robot:
         # print(Neff)
 
         if Neff < NTH:  # resampling
+            print("resampling")
             wcum = np.cumsum(pw)
             base = np.cumsum(pw * 0.0 + 1 / PARTICLE_NUM) - 1 / PARTICLE_NUM
             resampleid = base + np.random.rand(base.shape[0]) / PARTICLE_NUM
@@ -317,29 +343,33 @@ class Particle:
 
 def calc_input1(time):
 
-	if time <= 1.0:	# wait at first
-		v = 0.0
-		yawrate = 0.0
-	else:
-		v = 1.0		# v[m/s]
-		yawrate = 0.0		# w[rad/s]
+    if time <= 1.0:	# wait at first
+        v = 0.0
+        yawrate = 0.0
+    else:
+        #v = 1.0		# v[m/s]
+        #yawrate = 0.0		# w[rad/s]
+        v = np.random.rand()                 # v[m/s]
+        yawrate = np.random.randn() * 1.5   # w[rad/s]
 
-	u = np.array([v, yawrate]).reshape(2, 1)
+    u = np.array([v, yawrate]).reshape(2, 1)
 
-	return u
+    return u
 
 def calc_input2(time):
 
-	if time <= 1.0:	# wait at first
-		v = 0.0
-		yawrate = 0.0
-	else:
-		v = 1.0		# v[m/s]
-		yawrate = 0.0		# w[rad/s]
+    if time <= 1.0:	# wait at first
+        v = 0.0
+        yawrate = 0.0
+    else:
+        #v = 1.0		# v[m/s]
+        #yawrate = 0.0		# w[rad/s]
+        v = np.random.rand()                # v[m/s]
+        yawrate = np.random.randn() * 1.5   # w[rad/s]
 
-	u = np.array([v, yawrate]).reshape(2, 1)
+    u = np.array([v, yawrate]).reshape(2, 1)
 
-	return u
+    return u
 
 def motion_model(x, u):
 
@@ -382,37 +412,39 @@ def main():
         u1 = calc_input1(time)
         u2 = calc_input2(time)
 
-        # Robot1
-        r1.action(u1)               # Move robot1
-        r1.observation(r2.xTrue)    # Observation robot1
-        r1.fast_slam(u1)            # Slam robot1
-        r1.calc_final_state()
-        r1.store_history()
-
-        # Robot2
-        r2.action(u2)               # Move robot2
-        r2.observation(r1.xTrue)    # Observation robot2
-        r2.fast_slam(u2)            # Slam robot2
-        r2.calc_final_state()
-        r2.store_history()
-
         if show_animation:  # pragma: no cover
             plt.cla()
+
+            # Robot1
+            r1.action(u1)               # Move robot1
+            r1.observation(r2.xTrue)    # Observation robot1
+            r1.fast_slam(u1)            # Slam robot1
+            r1.calc_final_state()
+            r1.store_history()
 
             for i in range(PARTICLE_NUM):
                 # Particles1
                 plt.plot(r1.particles[i].x, r1.particles[i].y, ".", c = "#5EC84E")
                 plt.plot(r1.particles[i].lm[:, 0], r1.particles[i].lm[:, 1], "xb")
 
-                # Particles2
-                plt.plot(r2.particles[i].x, r2.particles[i].y, ".", c = "#5EC84E")
-                plt.plot(r2.particles[i].lm[:, 0], r2.particles[i].lm[:, 1], "xb")
-
             # Robot1
             plt.plot(r1.hxTrue[0, :], r1.hxTrue[1, :], "-b")
             plt.plot(r1.hxDead[0, :], r1.hxDead[1, :], "-k")
             plt.plot(r1.hxSlam[0, :], r1.hxSlam[1, :], "-r")
             plt.plot(r1.xSlam[0], r1.xSlam[1], "Xk")
+
+            # Robot2
+            r2.action(u2)               # Move robot2
+            r2.observation(r1.xTrue)    # Observation robot2
+            r2.fast_slam(u2)            # Slam robot2
+            r2.calc_final_state()
+            r2.store_history()
+
+            for i in range(PARTICLE_NUM):
+                # Particles2
+                plt.plot(r2.particles[i].x, r2.particles[i].y, ".", c = "#5EC84E")
+                plt.plot(r2.particles[i].lm[:, 0], r2.particles[i].lm[:, 1], "xr")
+
             # Robot2
             plt.plot(r2.hxTrue[0, :], r2.hxTrue[1, :], "-b")
             plt.plot(r2.hxDead[0, :], r2.hxDead[1, :], "-k")
@@ -421,7 +453,7 @@ def main():
 
             plt.axis("equal")
             plt.grid(True)
-            plt.pause(0.001)
+            plt.pause(0.1)
 
 if __name__ == '__main__':
     main()
