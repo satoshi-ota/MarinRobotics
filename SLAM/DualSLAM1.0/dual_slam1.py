@@ -9,23 +9,23 @@ import matplotlib.pyplot as plt
 import time as TIME
 
 # Fast SLAM covariance
-Q1 = np.diag([0.3, np.deg2rad(2.0)])**2
-R1 = np.diag([0.1, np.deg2rad(6.0)])**2
+Q1 = np.diag([0.1, np.deg2rad(1.0)])**2
+R1 = np.diag([0.2, np.deg2rad(4.0)])**2
 OFFSET_YAWRATE_NOISE1 = 0.01
 
 #  Simulation parameter
-Q2 = np.diag([0.3, np.deg2rad(2.0)])**2
-R2 = np.diag([0.1, np.deg2rad(6.0)])**2
+Q2 = np.diag([0.1, np.deg2rad(1.0)])**2
+R2 = np.diag([0.2, np.deg2rad(4.0)])**2
 OFFSET_YAWRATE_NOISE2 = 0.01
 
 DT = 0.1	# time delta
 MAX_STEP = 5000 	# maximum step
-SIM_TIME = 200.0	# simulation time
-MAX_RANGE = 20.0	# maximum observation range
+SIM_TIME = 20.0	# simulation time
+MAX_RANGE = 200.0	# maximum observation range
 STATE_SIZE = 3 # Robot state(x, y, yaw)
 LM_SIZE = 2 # Land mark(x, y)
 PARTICLE_NUM = 100 # Nuber of particles
-NTH = PARTICLE_NUM / 5.0  # Number of particle for re-sampling
+NTH = PARTICLE_NUM / 3.0  # Number of particle for re-sampling
 
 show_animation = True
 
@@ -178,11 +178,11 @@ class Robot:
     def update_landmark(self, particle):
 
         # DEBUG
-        r = self.z[0]
-        b = self.z[1]
-        s = math.sin(pi_2_pi(self.xTrue[2, 0] + b))
-        c = math.cos(pi_2_pi(self.xTrue[2, 0] + b))
-        plt.plot(self.xTrue[0, 0] + r * c, self.xTrue[1, 0] + r * s, "ob")
+        #r = self.z[0]
+        #b = self.z[1]
+        #s = math.sin(pi_2_pi(self.xTrue[2, 0] + b))
+        #c = math.cos(pi_2_pi(self.xTrue[2, 0] + b))
+        #plt.plot(self.xTrue[0, 0] + r * c, self.xTrue[1, 0] + r * s, "ob")
 
         # Compute Delta
         lmx = particle.lm[0, 0:2].reshape(2, 1) # (lm_x[t-1], lm_y[t-1])
@@ -425,7 +425,7 @@ def main():
             for i in range(PARTICLE_NUM):
                 # Particles1
                 plt.plot(r1.particles[i].x, r1.particles[i].y, ".", c = "#5EC84E")
-                plt.plot(r1.particles[i].lm[:, 0], r1.particles[i].lm[:, 1], "xb")
+                #plt.plot(r1.particles[i].lm[:, 0], r1.particles[i].lm[:, 1], "xb")
 
             # Robot1
             plt.plot(r1.hxTrue[0, :], r1.hxTrue[1, :], "-b")
@@ -443,7 +443,7 @@ def main():
             for i in range(PARTICLE_NUM):
                 # Particles2
                 plt.plot(r2.particles[i].x, r2.particles[i].y, ".", c = "#5EC84E")
-                plt.plot(r2.particles[i].lm[:, 0], r2.particles[i].lm[:, 1], "xr")
+                #plt.plot(r2.particles[i].lm[:, 0], r2.particles[i].lm[:, 1], "xr")
 
             # Robot2
             plt.plot(r2.hxTrue[0, :], r2.hxTrue[1, :], "-b")
