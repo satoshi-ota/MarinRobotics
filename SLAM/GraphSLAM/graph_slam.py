@@ -3,7 +3,6 @@ GraphSLAM
 
 UTokyo AILab
 author: Ota Satoshi
-
 """
 
 import numpy as np
@@ -32,166 +31,92 @@ MAX_ITR = 20  # Maximum iteration
 show_graph_dtime = 20.0  # [s]
 show_animation = True
 
+class Robot():
+
+    def __init__(self):
+
+        # Trajectory
+        self.xTrue = np.zeros((STATE_SIZE, 1))
+        self.xDead = np.zeros((STATE_SIZE, 1))
+        self.xSlam = np.zeros((STATE_SIZE, 1))
+
+        # Trajectory history
+        self.hxTrue = np.zeros((STATE_SIZE, 1))
+        self.hxDead = np.zeros((STATE_SIZE, 1))
+
+        # Observation history
+        self.hz = np.zeros((3, 1))
+
+        # Step Count
+        self.step_cnt = 0
+
+    def count_up(self):
+        selt.step_cnt += 1
+
+    def observation(self, u, LANDMARK):
+
+        self.xTrue = motion_model(self.xTrue, u)
+
+        # add noise to gps x-y
+        z = np.zeros((0, 4))
+
+        for i in range(len(LANDMARK[:, 0])):
+
+            dx = LANDMARK[i, 0] - self.xTrue[0, 0]
+            dy = LANDMARK[i, 1] - self.xTrue[1, 0]
+            d = math.sqrt(dx**2 + dy**2)
+            angle = pi_2_pi(math.atan2(dy, dx)) - xTrue[2, 0]
+            if d <= MAX_RANGE:
+                dn = d + np.random.randn() * Qsim[0, 0]  # add noise
+                angle_with_noise = angle + np.random.randn() * Qsim[1, 1]
+
+                zi = np.array([dn, angle, i])
+                z = np.vstack((z, zi))
+
+        # add noise to input
+        u_v = u[0, 0] + np.random.randn() * Rsim[0, 0]
+        u_w = u[1, 0] + np.random.randn() * Rsim[1, 1]
+        u_with_noise = np.array([[u_v, u_w]]).T
+
+        self.xDead = motion_model(self.xDead, u_with_noise)
+
+        return z, u_with_noise
+
+    def graph_slam(self):
+        self.count_up()
+        H, xi = self.edge_init()
+        H, xi = self.edge_linearize()
+        H, xi = self.edge_reduce()
+        H, xi = self.edge_solve()
+
+    def edge_init(self):
+
+        full_size = self.step_cnt + len(LANDMARK[:, 0])
+        H = np.zeros((full_size * 3, full_size * 3))    # Full scale Infomation matrix
+        xi = np.zeros((full_size * 3, 1))               # Full scale Infomation vector
+
+        return H, xi
+
+    def edge_linearize(self):
+
+    def add_initial_attitude(self, H, xi):
+
+        omega_0 = np.diag([np.inf, np.inf, np.inf])
+
+
+    def compute_jacobian(self):
+
+    def add_edge(self):
+
+    def edge_reduce(self):
+
+    def edge_solve(self):
 
 class Edge():
 
     def __init__(self):
-        self.e = np.zeros((3, 1))
-        self.omega = np.zeros((3, 3))  # information matrix
-        self.d1 = 0.0
-        self.d2 = 0.0
-        self.yaw1 = 0.0
-        self.yaw2 = 0.0
-        self.angle1 = 0.0
-        self.angle2 = 0.0
-        self.id1 = 0
-        self.id2 = 0
-
-
-def cal_observation_sigma(d):
-
-    sigma = np.zeros((3, 3))
-    sigma[0, 0] = C_SIGMA1**2
-    sigma[1, 1] = C_SIGMA2**2
-    sigma[2, 2] = C_SIGMA3**2
-
-    return sigma
-
-
-def calc_rotational_matrix(angle):
-
-    Rt = np.array([[math.cos(angle), -math.sin(angle), 0],
-                   [math.sin(angle), math.cos(angle), 0],
-                   [0, 0, 1.0]])
-    return Rt
-
-
-def calc_edge(x1, y1, yaw1, x2, y2, yaw2, d1,
-              angle1, phi1, d2, angle2, phi2, t1, t2):
-    edge = Edge()
-
-    tangle1 = pi_2_pi(yaw1 + angle1)
-    tangle2 = pi_2_pi(yaw2 + angle2)
-    tmp1 = d1 * math.cos(tangle1)
-    tmp2 = d2 * math.cos(tangle2)
-    tmp3 = d1 * math.sin(tangle1)
-    tmp4 = d2 * math.sin(tangle2)
-
-    edge.e[0, 0] = x2 - x1 - tmp1 + tmp2
-    edge.e[1, 0] = y2 - y1 - tmp3 + tmp4
-    edge.e[2, 0] = 0
-
-    Rt1 = calc_rotational_matrix(tangle1)
-    Rt2 = calc_rotational_matrix(tangle2)
-
-    sig1 = cal_observation_sigma(d1)
-    sig2 = cal_observation_sigma(d2)
-
-    edge.omega = np.linalg.inv(Rt1 @ sig1 @ Rt1.T + Rt2 @ sig2 @ Rt2.T)
-
-    edge.d1, edge.d2 = d1, d2
-    edge.yaw1, edge.yaw2 = yaw1, yaw2
-    edge.angle1, edge.angle2 = angle1, angle2
-    edge.id1, edge.id2 = t1, t2
-
-    return edge
-
-
-def calc_edges(xlist, zlist):
-
-    edges = []
-    cost = 0.0
-    zids = list(itertools.combinations(range(len(zlist)), 2))
-
-    for (t1, t2) in zids:
-        x1, y1, yaw1 = xlist[0, t1], xlist[1, t1], xlist[2, t1]
-        x2, y2, yaw2 = xlist[0, t2], xlist[1, t2], xlist[2, t2]
-
-        if zlist[t1] is None or zlist[t2] is None:
-            continue  # No observation
-
-        for iz1 in range(len(zlist[t1][:, 0])):
-            for iz2 in range(len(zlist[t2][:, 0])):
-                if zlist[t1][iz1, 3] == zlist[t2][iz2, 3]:
-                    d1 = zlist[t1][iz1, 0]
-                    angle1, phi1 = zlist[t1][iz1, 1], zlist[t1][iz1, 2]
-                    d2 = zlist[t2][iz2, 0]
-                    angle2, phi2 = zlist[t2][iz2, 1], zlist[t2][iz2, 2]
-
-                    edge = calc_edge(x1, y1, yaw1, x2, y2, yaw2, d1,
-                                     angle1, phi1, d2, angle2, phi2, t1, t2)
-
-                    edges.append(edge)
-                    cost += (edge.e.T @ (edge.omega) @ edge.e)[0, 0]
-
-    print("cost:", cost, ",nedge:", len(edges))
-    return edges
-
-
-def calc_jacobian(edge):
-    t1 = edge.yaw1 + edge.angle1
-    A = np.array([[-1.0, 0, edge.d1 * math.sin(t1)],
-                  [0, -1.0, -edge.d1 * math.cos(t1)],
-                  [0, 0, 0]])
-
-    t2 = edge.yaw2 + edge.angle2
-    B = np.array([[1.0, 0, -edge.d2 * math.sin(t2)],
-                  [0, 1.0, edge.d2 * math.cos(t2)],
-                  [0, 0, 0]])
-
-    return A, B
-
-
-def fill_H_and_b(H, b, edge):
-
-    A, B = calc_jacobian(edge)
-
-    id1 = edge.id1 * STATE_SIZE
-    id2 = edge.id2 * STATE_SIZE
-
-    H[id1:id1 + STATE_SIZE, id1:id1 + STATE_SIZE] += A.T @ edge.omega @ A
-    H[id1:id1 + STATE_SIZE, id2:id2 + STATE_SIZE] += A.T @ edge.omega @ B
-    H[id2:id2 + STATE_SIZE, id1:id1 + STATE_SIZE] += B.T @ edge.omega @ A
-    H[id2:id2 + STATE_SIZE, id2:id2 + STATE_SIZE] += B.T @ edge.omega @ B
-
-    b[id1:id1 + STATE_SIZE] += (A.T @ edge.omega @ edge.e)
-    b[id2:id2 + STATE_SIZE] += (B.T @ edge.omega @ edge.e)
-
-    return H, b
-
-
-def graph_based_slam(x_init, hz):
-    print("start graph based slam")
-
-    zlist = copy.deepcopy(hz)
-
-    x_opt = copy.deepcopy(x_init)
-    nt = x_opt.shape[1]
-    n = nt * STATE_SIZE
-
-    for itr in range(MAX_ITR):
-        edges = calc_edges(x_opt, zlist)
-
-        H = np.zeros((n, n))
-        b = np.zeros((n, 1))
-
-        for edge in edges:
-            H, b = fill_H_and_b(H, b, edge)
-
-        # to fix origin
-        H[0:STATE_SIZE, 0:STATE_SIZE] += np.identity(STATE_SIZE)
-
-        dx = - np.linalg.inv(H) @ b
-
-        for i in range(nt):
-            x_opt[0:3, i] += dx[i * 3:i * 3 + 3, 0]
-
-        diff = dx.T @ dx
-        print("iteration: %d, diff: %f" % (itr + 1, diff))
-        if diff < 1.0e-5:
-            break
-
-    return x_opt
+        self.omega = np.zeros((3, 3))  # Information matrix
+        self.xi = np.zeros((3, 1))     # Infomation vector
 
 
 def calc_input():
@@ -199,39 +124,6 @@ def calc_input():
     yawrate = 0.1  # [rad/s]
     u = np.array([[v, yawrate]]).T
     return u
-
-
-def observation(xTrue, xd, u, RFID):
-
-    xTrue = motion_model(xTrue, u)
-
-    # add noise to gps x-y
-    z = np.zeros((0, 4))
-
-    for i in range(len(RFID[:, 0])):
-
-        dx = RFID[i, 0] - xTrue[0, 0]
-        dy = RFID[i, 1] - xTrue[1, 0]
-        d = math.sqrt(dx**2 + dy**2)
-        angle = pi_2_pi(math.atan2(dy, dx)) - xTrue[2, 0]
-        phi = pi_2_pi(math.atan2(dy, dx))
-        if d <= MAX_RANGE:
-            dn = d + np.random.randn() * Qsim[0, 0]  # add noise
-            angle_noise = np.random.randn() * Qsim[1, 1]
-            angle += angle_noise
-            phi += angle_noise
-            zi = np.array([dn, angle, phi, i])
-            z = np.vstack((z, zi))
-
-    # add noise to input
-    ud1 = u[0, 0] + np.random.randn() * Rsim[0, 0]
-    ud2 = u[1, 0] + np.random.randn() * Rsim[1, 1]
-    ud = np.array([[ud1, ud2]]).T
-
-    xd = motion_model(xd, ud)
-
-    return xTrue, z, xd, ud
-
 
 def motion_model(x, u):
 
@@ -253,17 +145,17 @@ def pi_2_pi(angle):
 
 
 def main():
-    print(__file__ + " start!!")
+    print("Running!!")
 
     time = 0.0
 
     # RFID positions [x, y, yaw]
-    RFID = np.array([[10.0, -2.0, 0.0],
-                     [15.0, 10.0, 0.0],
-                     [3.0, 15.0, 0.0],
-                     [-5.0, 20.0, 0.0],
-                     [-5.0, 5.0, 0.0]
-                     ])
+    LANDMARK = np.array([[10.0, -2.0],
+                        [15.0, 10.0],
+                        [3.0, 15.0],
+                        [-5.0, 20.0],
+                        [-5.0, 5.0]
+                        ])
 
     # State Vector [x y yaw v]'
     xTrue = np.zeros((STATE_SIZE, 1))
