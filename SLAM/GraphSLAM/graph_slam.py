@@ -13,27 +13,23 @@ import matplotlib.pyplot as plt
 
 
 #  Simulation parameter
-Qsim = np.diag([0.2, np.deg2rad(1.0)])**2
-Rsim = np.diag([0.1, np.deg2rad(10.0)])**2
+Q = np.diag([0.2, np.deg2rad(1.0)])**2
+M = np.diag([0.1, np.deg2rad(10.0)])**2
 
 DT = 2.0  # time tick [s]
 SIM_TIME = 100.0  # simulation time [s]
 MAX_RANGE = 30.0  # maximum observation range
 STATE_SIZE = 3  # State size [x,y,yaw]
 
-# Covariance parameter of Graph Based SLAM
-C_SIGMA1 = 0.1
-C_SIGMA2 = 0.1
-C_SIGMA3 = np.deg2rad(1.0)
-
-MAX_ITR = 20  # Maximum iteration
-
 show_graph_dtime = 20.0  # [s]
 show_animation = True
 
+first_obs = True
+first_control = True
+
 class Robot():
 
-    def __init__(self):
+    def __init__(self, Q, M):
 
         # Trajectory
         self.xTrue = np.zeros((STATE_SIZE, 1))
@@ -41,72 +37,157 @@ class Robot():
         self.xSlam = np.zeros((STATE_SIZE, 1))
 
         # Trajectory history
-        self.hxTrue = np.zeros((STATE_SIZE, 1))
-        self.hxDead = np.zeros((STATE_SIZE, 1))
+        self.hxTrue = self.xTrue
+        self.hxDead = self.xDead
+        self.hxSlam = self.xSlam
+
+        # Observation
+        self.z = np.zeros((3, 1))
 
         # Observation history
         self.hz = np.zeros((3, 1))
 
+        # Control history
+        self.hu = np.zeros((2, 1))
+
         # Step Count
         self.step_cnt = 0
+
+        # SLAM Covariance
+        self.Q = Q
+        self.M = M
+
 
     def count_up(self):
         selt.step_cnt += 1
 
-    def observation(self, u, LANDMARK):
+    def action(self, u):
 
         self.xTrue = motion_model(self.xTrue, u)
+        self.hxTrue = np.hstack((self.hxTrue, self.xTrue))
 
-        # add noise to gps x-y
-        z = np.zeros((0, 4))
+        # add noise to input
+        u_v = u[0, 0] + np.random.randn() * self.M[0, 0]
+        u_w = u[1, 0] + np.random.randn() * self.M[1, 1]
+        u_with_noise = np.array([[u_v, u_w]]).T
+
+        # add control history
+        if first_control:
+
+            first_control = False
+            self.hu = u
+
+        else:
+            self.hz = np.hstack((self.hz, u))
+
+        self.xDead = motion_model(self.xDead, u_with_noise)
+        self.hxDead = np.hstack((self.hxDead, self.xDead))
+
+
+    def observation(self, LANDMARK):
 
         for i in range(len(LANDMARK[:, 0])):
 
             dx = LANDMARK[i, 0] - self.xTrue[0, 0]
             dy = LANDMARK[i, 1] - self.xTrue[1, 0]
             d = math.sqrt(dx**2 + dy**2)
-            angle = pi_2_pi(math.atan2(dy, dx)) - xTrue[2, 0]
+            angle = pi_2_pi(math.atan2(dy, dx)) - self.xTrue[2, 0]
             if d <= MAX_RANGE:
-                dn = d + np.random.randn() * Qsim[0, 0]  # add noise
-                angle_with_noise = angle + np.random.randn() * Qsim[1, 1]
+                dn = d + np.random.randn() * self.Q[0, 0]  # add noise
+                angle_with_noise = angle + np.random.randn() * self.Q[1, 1]
 
                 zi = np.array([dn, angle, i])
-                z = np.vstack((z, zi))
+                self.z = np.vstack((z, zi))
 
-        # add noise to input
-        u_v = u[0, 0] + np.random.randn() * Rsim[0, 0]
-        u_w = u[1, 0] + np.random.randn() * Rsim[1, 1]
-        u_with_noise = np.array([[u_v, u_w]]).T
+        if first_obs:
 
-        self.xDead = motion_model(self.xDead, u_with_noise)
+            first_obs = False
+            self.hz = self.z
 
-        return z, u_with_noise
+        else:
+            self.hz = np.hstack((self.hz, self.z))
 
-    def graph_slam(self):
+
+    def graph_slam(self):       # return Sig, xEst
         self.count_up()
-        H, xi = self.edge_init()
-        H, xi = self.edge_linearize()
-        H, xi = self.edge_reduce()
-        H, xi = self.edge_solve()
+        InfoM, InfoV = self.edge_init()
+        InfoM, InfoV = self.edge_linearize()
+        InfoM, InfoV = self.edge_reduce()
+        Sig, xEst = self.edge_solve()
+
+        return Sig, xEst
 
     def edge_init(self):
 
         full_size = self.step_cnt + len(LANDMARK[:, 0])
-        H = np.zeros((full_size * 3, full_size * 3))    # Full scale Infomation matrix
-        xi = np.zeros((full_size * 3, 1))               # Full scale Infomation vector
+        InfoM = np.zeros((full_size * 3, full_size * 3))    # Full scale Infomation matrix
+        InfoV = np.zeros((full_size * 3, 1))               # Full scale Infomation vector
 
-        return H, xi
+        return InfoM, InfoV
 
-    def edge_linearize(self):
+    def edge_linearize(self, InfoM, InfoV):
 
-    def add_initial_attitude(self, H, xi):
+        # Add Infomation matrix[t=0]
+        H[0:3, 0:3] = np.diag([np.inf, np.inf, np.inf])
 
-        omega_0 = np.diag([np.inf, np.inf, np.inf])
+        # Add Edge for all controls
+        for t in range(len(self.hxDead[0, :])):
+
+            if t != 0:
+                xn = self.hxDead[:, t]
+                xp = self.hxDead[:, t-1]
+                ui = self.hu[:, t-1]
+
+                R = self.compute_R(xn)
+                G = self.compute_jacob_G(xn, ui)
+
+                H = self.add_edge_control(InfoM, InfoV, R, G, xn, xp, t-1)
 
 
-    def compute_jacobian(self):
 
-    def add_edge(self):
+        # Add Edge for all observations
+
+    def compute_R(self, xD):
+
+        V = np.array([[DT * math.cos(xD[2, 0]), 0.0],
+                      [DT * math.sin(xD[2, 0]), 0.0],
+                      [0.0, DT]])
+
+        return V @ self.M @ V.T
+
+    def compute_jacob_G(self, xD, ui):
+
+        G = np.array([[1.0, 0.0, - DT * ui[0, 0] * math.sin(xD[2, 0])],
+                      [0.0, 1.0,   DT * ui[1, 0] * math.cos(xD[2, 0])],
+                      [0.0, 0.0, 1.0]])
+
+        return G
+
+    def compute_jacob_H(self):
+
+        return H
+
+    def add_edge_control(self, InfoM, InfoV, R, G, xn, xp, i):
+
+        I = np.eye(STATE_SIZE)
+        GI = np.hstack((-G, I))
+
+        RInv = np.linalg.inv(R)
+
+        Om = GI.T @ RInv @ GI
+
+        # Add Edge
+        InfoM[i:3, i:3] = Om[0:3, 0:3]
+        InfoM[i:3, i+3:3] = Om[0:3, 3:3]
+        InfoM[i+3:3, i:3] = Om[3:3, 0:3]
+        InfoM[i+3:3, i+3:3] = Om[3:3, 3:3]
+
+        xi = GI.T @ RInv @ (xn - G @ xp)
+
+        InfoV[i:3, 1] = xi[0:3, 1]
+        InfoV[i+3:3, 1] = xi[3:3, 1]
+
+        return InfoM, InfoV
 
     def edge_reduce(self):
 
@@ -149,6 +230,9 @@ def main():
 
     time = 0.0
 
+    # Creat robot instance
+    rov = Robot()
+
     # RFID positions [x, y, yaw]
     LANDMARK = np.array([[10.0, -2.0],
                         [15.0, 10.0],
@@ -157,31 +241,14 @@ def main():
                         [-5.0, 5.0]
                         ])
 
-    # State Vector [x y yaw v]'
-    xTrue = np.zeros((STATE_SIZE, 1))
-    xDR = np.zeros((STATE_SIZE, 1))  # Dead reckoning
-
-    # history
-    hxTrue = []
-    hxDR = []
-    hz = []
     dtime = 0.0
     init = False
     while SIM_TIME >= time:
 
-        if not init:
-            hxTrue = xTrue
-            hxDR = xTrue
-            init = True
-        else:
-            hxDR = np.hstack((hxDR, xDR))
-            hxTrue = np.hstack((hxTrue, xTrue))
-
-        time += DT
-        dtime += DT
         u = calc_input()
-
-        xTrue, z, xDR, ud = observation(xTrue, xDR, u, RFID)
+        rov.action(u)
+        rov.observation(LANDMARK)
+        rov.graph_slam()
 
         hz.append(z)
 
