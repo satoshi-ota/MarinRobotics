@@ -20,6 +20,7 @@ DT = 2.0  # time tick [s]
 SIM_TIME = 100.0  # simulation time [s]
 MAX_RANGE = 300.0  # maximum observation range
 STATE_SIZE = 3  # State size [x,y,yaw]
+OBS_SIZE = 3    # Observation size [d, phi, c]
 
 show_graph_dtime = 20.0  # [s]
 show_animation = True
@@ -32,20 +33,34 @@ class Robot():
     def __init__(self, Q, M, LANDMARK):
 
         # Trajectory
+        # self.x = [[ x[0]],
+        #           [ y[0]],
+        #           [th[0]]]
         self.xTrue = np.zeros((STATE_SIZE, 1))
         self.xDead = np.zeros((STATE_SIZE, 1))
         self.xSlam = np.zeros((STATE_SIZE, 1))
 
         # Trajectory history
+        # self.hx = [[ x[0],  x[1], ... , x[t]],
+        #            [ y[0],  y[1], ... , y[t]],
+        #            [th[0], th[1], ... , th[t]]
         self.hxTrue = self.xTrue
         self.hxDead = self.xDead
         self.hxSlam = self.xSlam
 
         # Observation
-        self.z = np.zeros((0, 3))
+        # self.z = [[d0, phi0, c0],
+        #           [d1, phi1, c1],
+        #           ...
+        #           [dN, phiN, cN]]
+        self.z = np.zeros((0, OBS_SIZE))
 
         # Observation history
-        self.hz = np.zeros((3, 0))
+        # self.hz = [[d0[0], phi0[0], c0[0], d0[1], phi0[0], c0[0], ... ,d0[t], phi0[t], c0[t]],
+        #            [d1[0], phi1[0], c1[0], d1[1], phi1[1], c1[1], ... ,d1[t], phi1[t], c1[t]],
+        #            ...
+        #            [dN[0], phiN[0], cN[0], dN[1], phiN[1], cN[1], ... ,dN[t], phiN[t], cN[t]]]
+        self.hz = np.zeros((len(LANDMARK[:, 0]), 0))
 
         # Control history
         self.hu = np.zeros((2, 0))
@@ -58,9 +73,17 @@ class Robot():
         self.M = M
 
         # Map
+        # self.m = [[m0_x, m0_y],
+        #           [m1_x, m1_y],
+        #           ...
+        #           [mN_x, mN_y]]
         self.m =  np.zeros((len(LANDMARK[:, 0]), 2))
 
         # Map history
+        # self.hm = [[m0_x[0], m0_y[0], m0_x[1], m0_y[1], ... ,m0_x[t], m0_y[t]],
+        #            [m1_x[0], m1_y[0], m1_x[1], m1_y[1], ... ,m1_x[t], m1_y[t]],
+        #            ...
+        #            [mN_x[0], mN_y[0], mN_x[1], mN_y[1], ... ,mN_x[t], mN_y[t]]]
         self.hm = np.zeros((len(LANDMARK[:, 0]), 0))
 
     def count_up(self):
@@ -97,18 +120,19 @@ class Robot():
 
                 zi = np.array([dn, angle, i])
 
-                # add all feature
+                # add all observations
                 self.z = np.vstack((z, zi))
 
                 mi_x = self.xDead[0, 0] + d * math.cos(angle_with_noise)
                 mi_y = self.xDead[1, 0] + d * math.sin(angle_with_noise)
                 mi = np.array([m_x, m_y])
 
+                # add all features
                 sekf.m = np.vstack((m, mi))
 
         # add observation history
         self.hz = np.hstack((self.hz, self.z))
-        
+
         # add map history
         self.hm = np.hstack((self.hm, self.m))
 
@@ -156,7 +180,7 @@ class Robot():
             # Map[t-1]
             mt = self.hm[:, (t-1)*2:t*2]
 
-            for i in range(len(self.z[:, 0]))
+            for i in range(len(self.z[:, 0])):
 
                 # i th feature[t-1]
                 mi = mt[t, :]
@@ -176,8 +200,10 @@ class Robot():
                 angle = pi_2_pi(math.atan2(dy, dx)) - xn[2, 0]
 
                 zHat = np.array([d, angle, i])
-                
+
                 InfoM, InfoV = self.add_edge_observe(InfoM, InfoV, H, zi, zHat, t, i)
+
+        return InfoM, InfoV
 
 
     def compute_R(self, xD):
@@ -229,8 +255,8 @@ class Robot():
 
         return InfoM, InfoV
 
-    def add_edge_observe(self, InfoM, InfoV, H, zi, zHat, t, i)
-        
+    def add_edge_observe(self, InfoM, InfoV, H, zi, zHat, t, i):
+
         QInv = np.linalg.inv(Q)
         Om = H.T @ QInv @ H
 
@@ -243,21 +269,18 @@ class Robot():
         InfoM[xlen*3+i*3:xlen*3+(i+1)*3, xlen*3+i*3:xlen*3*(i+1)*3] = Om[3:6, 3:6]
 
         # Creat complex state vector
-        yt = np.array([self.xDead[:, t], self.m[]])
-    
-        xi = H.T @ QInv @ (zi.T - zHat.H - )
+        yt = np.array([self.hxDead[:, t], self.hm[i, t]])
 
+        xi = H.T @ QInv @ (zi.T - zHat.T + H @ y.T)
+
+        InfoV[] = xi[]
+        InfoV[] = xi[]
+
+        return InfoM, InfoV
 
     def edge_reduce(self):
 
     def edge_solve(self):
-
-class Edge():
-
-    def __init__(self):
-        self.omega = np.zeros((3, 3))  # Information matrix
-        self.xi = np.zeros((3, 1))     # Infomation vector
-
 
 def calc_input():
     v = 1.0  # [m/s]
