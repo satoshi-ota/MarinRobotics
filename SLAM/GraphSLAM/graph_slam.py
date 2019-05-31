@@ -11,13 +11,13 @@ import copy
 import itertools
 import matplotlib.pyplot as plt
 
-
 #  Simulation parameter
 Q = np.diag([0.2, np.deg2rad(1.0), 0.2])**2
 M = np.diag([0.1, np.deg2rad(10.0)])**2
 
 DT = 2.0  # time tick [s]
 SIM_TIME = 100.0  # simulation time [s]
+MAX_STEP = 1
 MAX_RANGE = 300.0  # maximum observation range
 STATE_SIZE = 3  # State size [x,y,yaw]
 OBS_SIZE = 3    # Observation size [d, phi, c]
@@ -138,7 +138,8 @@ class Robot():
         # add observation history
         self.hz = np.hstack((self.hz, self.z))
         # add map history
-        self.hm = np.hstack((self.hm, self.m))
+        #self.hm = np.hstack((self.hm, self.m))
+        self.hm = np.hstack((self.hm, LANDMARK))
 
     def graph_slam(self):
         self.count_up()
@@ -146,7 +147,7 @@ class Robot():
         InfoM, InfoV = self.edge_linearize(InfoM, InfoV)
         IMTil, IVTil = self.edge_reduce(InfoM, InfoV)
         xCov, xAve = self.edge_solve(IMTil, IVTil)
-        print(xAve)
+        #print(xAve)
         self.extract_pos(xAve)
 
         return xCov, xAve
@@ -169,28 +170,31 @@ class Robot():
             if t == 0:
                 continue
 
+            #print(t)
+
             # t = 1, 2, ... ,t
             xn = self.hxDead[:, t].reshape((3, 1))
             xp = self.hxDead[:, t-1].reshape((3, 1))
             ui = self.hu[:, t-1].reshape((2, 1))
 
+            #print(ui)
+
             R = self.compute_R(xn)
             G = self.compute_jacob_G(xn, ui)
             # Add Edge for all controls
-            InfoM, InfoV = self.add_edge_control(InfoM, InfoV, R, G, xn, xp, t-1)
+            InfoM, InfoV = self.add_edge_control(InfoM, InfoV, R, G, xn, xp, t)
             # Features[t]
             zt = self.hz[:, (t-1)*3:t*3]
             # Map[t-1]
-            mt = self.hm[:, (t-1)*2:t*2]
+            mt = self.hm[:, (t-1)*3:t*3]
 
             for i in range(len(self.z[:, 0])):
                 #print(self.hz, zt)
                 # i th feature[t-1]
                 mi = mt[i, :]
-                xn = self.hxDead[:, t].reshape((3, 1))
-
-                dx = mt[0, 0] - xn[0, 0]
-                dy = mt[0, 1] - xn[1, 0]
+                #print(mi)
+                dx = mi[0] - xn[0, 0]
+                dy = mi[1] - xn[1, 0]
 
                 H = self.compute_jacob_H(dx, dy)
 
@@ -202,7 +206,7 @@ class Robot():
                 zHat = np.array([d, angle, i])
                 # Add Edge for all observation
                 InfoM, InfoV = self.add_edge_observe(InfoM, InfoV, H, zi, zHat, t, i)
-
+        print(InfoV)
         return InfoM, InfoV
 
 
@@ -214,10 +218,10 @@ class Robot():
 
         return V @ self.M @ V.T
 
-    def compute_jacob_G(self, xD, ui):
+    def compute_jacob_G(self, xn, ui):
         #print(ui)
-        G = np.array([[1.0, 0.0, - DT * ui[0, 0] * math.sin(xD[2, 0])],
-                      [0.0, 1.0,   DT * ui[1, 0] * math.cos(xD[2, 0])],
+        G = np.array([[1.0, 0.0, - DT * ui[0, 0] * math.sin(xn[2, 0])],
+                      [0.0, 1.0,   DT * ui[1, 0] * math.cos(xn[2, 0])],
                       [0.0, 0.0, 1.0]])
 
         return G
@@ -233,7 +237,7 @@ class Robot():
 
         return H
 
-    def add_edge_control(self, InfoM, InfoV, R, G, xn, xp, i):
+    def add_edge_control(self, InfoM, InfoV, R, G, xn, xp, t):
 
         I = np.eye(STATE_SIZE)
         GI = np.hstack((-G, I))
@@ -243,15 +247,15 @@ class Robot():
         Om = GI.T @ RInv @ GI
 
         # Add Edge
-        InfoM[i*3:(i+1)*3, i*3:(i+1)*3] = Om[0:3, 0:3]
-        InfoM[i*3:(i+1)*3, (i+1)*3:(i+2)*3] = Om[0:3, 3:6]
-        InfoM[(i+1)*3:(i+2)*3, i*3:(i+1)*3] = Om[3:6, 0:3]
-        InfoM[(i+1)*3:(i+2)*3, (i+1)*3:(i+2)*3] = Om[3:6, 3:6]
+        InfoM[(t-1)*3:t*3, (t-1)*3:t*3] += Om[0:3, 0:3]
+        InfoM[(t-1)*3:t*3, t*3:(t+1)*3] += Om[0:3, 3:6]
+        InfoM[t*3:(t+1)*3, (t-1)*3:t*3] += Om[3:6, 0:3]
+        InfoM[t*3:(t+1)*3, t*3:(t+1)*3] += Om[3:6, 3:6]
 
         xi = GI.T @ RInv @ (xn - G @ xp)
         #print(xi[0:3, 0].reshape((3, 1)))
-        InfoV[i*3:(i+1)*3, 0] = xi[0:3, 0]
-        InfoV[(i+1)*3:(i+2)*3, 0] = xi[3:6, 0]
+        InfoV[(t-1)*3:t*3, 0] += xi[0:3, 0]
+        InfoV[t*3:(t+1)*3, 0] += xi[3:6, 0]
         #print(InfoV)
         return InfoM, InfoV
 
@@ -261,13 +265,13 @@ class Robot():
         Om = H.T @ QInv @ H
 
         xlen = len(self.hxDead[0, :])
-
+        #print(xlen)
         # Add Edge
-        InfoM[t*3:(t+1)*3, t*3:(t+1)*3] = Om[0:3, 0:3]
-        InfoM[t*3:(t+1)*3, xlen*3+i*3:xlen*3+(i+1)*3] = Om[0:3, 3:6]
-        InfoM[xlen*3+i*3:xlen*3+(i+1)*3, t*3:(t+1)*3] = Om[3:6, 0:3]
-        InfoM[xlen*3+i*3:xlen*3+(i+1)*3, xlen*3+i*3:xlen*3+(i+1)*3] = Om[3:6, 3:6]
-        #print(zi,zHat)
+        InfoM[t*3:(t+1)*3, t*3:(t+1)*3] += Om[0:3, 0:3]
+        InfoM[t*3:(t+1)*3, xlen*3+i*3:xlen*3+(i+1)*3] += Om[0:3, 3:6]
+        InfoM[xlen*3+i*3:xlen*3+(i+1)*3, t*3:(t+1)*3] += Om[3:6, 0:3]
+        InfoM[xlen*3+i*3:xlen*3+(i+1)*3, xlen*3+i*3:xlen*3+(i+1)*3] += Om[3:6, 3:6]
+        #print(self.hm)
         # Creat complex state vector
         yt = np.zeros((6, 1))
         yt[0, 0] = self.hxDead[0, t]
@@ -275,19 +279,19 @@ class Robot():
         yt[2, 0] = self.hxDead[2, t]
         yt[3:6, 0] = self.hm[i, (t-1)*3:t*3]
         #yt[3, 0] = self.hm[i, t]
-        print(yt)
+        #print(InfoM)
         xi = H.T @ QInv @ (zi.T - zHat.T + H @ yt)
 
-        InfoV[t*3:(t+1)*3, 0] = xi[0:3, 0]
-        InfoV[xlen*3+i*3:xlen*3+(i+1)*3, 0] = xi[3:6, 0]
-
+        InfoV[t*3:(t+1)*3, 0] += xi[0:3, 0]
+        InfoV[xlen*3+i*3:xlen*3+(i+1)*3, 0] += xi[3:6, 0]
+        #print(InfoV)
         return InfoM, InfoV
 
     def edge_reduce(self, InfoM, InfoV):
 
         xlen = len(self.hxDead[0, :])
         mlen = len(self.z[: , 0])
-
+        #print(mlen)
         IMxx = InfoM[0:xlen*3, 0:xlen*3]
         IMxm = InfoM[0:xlen*3, xlen*3:xlen*3+mlen*3]
         IMmx = InfoM[xlen*3:xlen*3+mlen*3, 0:xlen*3]
@@ -301,23 +305,26 @@ class Robot():
         IVm = InfoV[xlen*3:xlen*3+mlen*3, 0]
 
         IVTil = IVx - IMxm @ IMmmInv @ IVm
-
+        #print(IVTil)
         return IMTil, IVTil
 
     def edge_solve(self, IMTil, IVTil):
 
         xCov = np.linalg.inv(IMTil)
         xAve = xCov @ IVTil
-        print(xAve)
+        #print(xAve)
         return xCov, xAve
 
     def extract_pos(self, xAve):
-        print(xAve.shape)
+
+        self.hxSlam = np.zeros((STATE_SIZE, 1))
+
         for t in range(int(len(xAve) / 3)):
 
-            xAvet = xAve[t*3:(t+1)*3].reshape((3, 1))
-            print(self.hxSlam, xAvet)
-            self.hxSlam = np.hstack((self.hxSlam, xAvet))
+            self.xSlam = xAve[t*3:(t+1)*3].reshape((3, 1))
+
+            self.hxSlam = np.hstack((self.hxSlam, self.xSlam ))
+            #print(self.xSlam )
 
 def calc_input():
     v = 1.0  # [m/s]
@@ -347,19 +354,22 @@ def main():
     print("Running!!")
 
     time = 0.0
+    step = 0
 
     # RFID positions [x, y, yaw]
-    LANDMARK = np.array([[10.0, -2.0],
-                        [15.0, 10.0],
-                        [3.0, 15.0],
-                        [-5.0, 20.0],
-                        [-5.0, 5.0]
-                        ])
+    LANDMARK = np.array([[10.0, -2.0, 0],
+                        [15.0, 10.0, 1],
+                        [3.0, 15.0, 2],
+                        [-5.0, 20.0, 3],
+                        [-5.0, 5.0, 4]])
 
     # Creat robot instance
     rov = Robot(Q, M, LANDMARK)
 
-    while SIM_TIME >= time:
+    while MAX_STEP >= step:
+        step += 1
+
+        #print(rov.step_cnt)
 
         u = calc_input()
         rov.action(u)
@@ -375,10 +385,9 @@ def main():
                      rov.hxTrue[1, :].flatten(), "-b")
             plt.plot(rov.hxDead[0, :].flatten(),
                      rov.hxDead[1, :].flatten(), "-k")
-            plt.plot(rov.hxSlam[0, :].flatten(),
-                     rov.hxSlam[1, :].flatten(), "-r")
-#                plt.plot(x_opt[0, :].flatten(),
-#                         x_opt[1, :].flatten(), "-r")
+            #plt.plot(rov.hxSlam[0, :].flatten(),
+            #         rov.hxSlam[1, :].flatten(), "-r")
+            plt.plot(rov.xSlam[0], rov.xSlam[1], "xk")
             plt.axis("equal")
             plt.grid(True)
             plt.title("Time" + str(time)[0:5])
