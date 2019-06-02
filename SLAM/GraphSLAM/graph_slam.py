@@ -7,17 +7,15 @@ author: Ota Satoshi
 
 import numpy as np
 import math
-import copy
-import itertools
 import matplotlib.pyplot as plt
 
 #  Simulation parameter
-Q = np.diag([0.2, np.deg2rad(1.0), 0.2])**2
-M = np.diag([0.1, np.deg2rad(10.0)])**2
+Q = np.diag([0.1, np.deg2rad(1.0), 0.1])**2
+M = np.diag([0.1, np.deg2rad(1.0)])**2
 
-DT = 2.0  # time tick [s]
+DT = 0.5  # time tick [s]
 SIM_TIME = 100.0  # simulation time [s]
-MAX_STEP = 1
+MAX_STEP = 100
 MAX_RANGE = 300.0  # maximum observation range
 STATE_SIZE = 3  # State size [x,y,yaw]
 OBS_SIZE = 3    # Observation size [d, phi, c]
@@ -61,31 +59,31 @@ class Robot():
         #            [d1[0], phi1[0], c1[0], d1[1], phi1[1], c1[1], ... ,d1[t], phi1[t], c1[t]],
         #            ...
         #            [dN[0], phiN[0], cN[0], dN[1], phiN[1], cN[1], ... ,dN[t], phiN[t], cN[t]]]
-        self.hz = np.zeros((len(LANDMARK[:, 0]), 0))
+        self.hz = np.zeros((len(LANDMARK[:, 0]), 3))
 
         # Control history
-        self.hu = np.zeros((2, 0))
+        self.hu = np.zeros((2, 1))
 
         # Step Count
         self.step_cnt = 1
 
         # SLAM Covariance
-        self.Q = Q
-        self.M = M
+        self.Q = Q # Observation
+        self.M = M # Motion
 
         # Map
         # self.m = [[m0_x, m0_y, s0],
         #           [m1_x, m1_y, s1],
         #           ...
         #           [mN_x, mN_y, sN]]
-        self.m =  np.zeros((0, 3))
+        self.m =  np.zeros((0, MAP_SIZE))
 
         # Map history
         # self.hm = [[m0_x[0], m0_y[0], s0[0], m0_x[1], m0_y[1], s0[1], ... ,m0_x[t], m0_y[t], s0[t]],
         #            [m1_x[0], m1_y[0], s1[0], m1_x[1], m1_y[1], s1[1], ... ,m1_x[t], m1_y[t], s1[t]],
         #            ...
         #            [mN_x[0], mN_y[0], sN[0], mN_x[1], mN_y[1], sN[2], ... ,mN_x[t], mN_y[t], sN[t]]]
-        self.hm = np.zeros((len(LANDMARK[:, 0]), 0))
+        self.hm = np.zeros((len(LANDMARK[:, 0]), 3))
 
         self.lm_num = len(LANDMARK[:, 0])
 
@@ -125,12 +123,12 @@ class Robot():
 
                 dn = d + np.random.randn() * self.Q[0, 0]  # add noise
                 angle_with_noise = angle + np.random.randn() * self.Q[1, 1]
-                zi = np.array([dn, angle, i])
+                zi = np.array([dn, angle_with_noise, i])
                 # add all observations
                 self.z = np.vstack((self.z, zi))
 
-                mi_x = self.xDead[0, 0] + d * math.cos(angle_with_noise)
-                mi_y = self.xDead[1, 0] + d * math.sin(angle_with_noise)
+                mi_x = self.xDead[0, 0] + d * math.cos(self.xDead[2, 0] + angle_with_noise)
+                mi_y = self.xDead[1, 0] + d * math.sin(self.xDead[2, 0] + angle_with_noise)
                 mi = np.array([mi_x, mi_y, i])
                 # add all features
                 self.m = np.vstack((self.m, mi))
@@ -156,73 +154,96 @@ class Robot():
 
         full_size = self.step_cnt + self.lm_num
         InfoM = np.zeros((full_size * 3, full_size * 3))    # Full scale Infomation matrix
-        InfoV = np.zeros((full_size * 3, 1))               # Full scale Infomation vector
+        InfoV = np.zeros((full_size * 3, 1))                # Full scale Infomation vector
 
         return InfoM, InfoV
 
     def edge_linearize(self, InfoM, InfoV):
 
         # Add Infomation matrix[t=0]
-        InfoM[0:3, 0:3] = np.diag([np.inf, np.inf, np.inf])
+        InfoM[0:3, 0:3] = np.diag([1e+6, 1e+6, 1e+6])
 
         for t in range(len(self.hxDead[0, :])):
-
+            #print(self.hu)
             if t == 0:
                 continue
-
-            #print(t)
-
+            #print(self.hu)
             # t = 1, 2, ... ,t
-            xn = self.hxDead[:, t].reshape((3, 1))
-            xp = self.hxDead[:, t-1].reshape((3, 1))
-            ui = self.hu[:, t-1].reshape((2, 1))
+            xNow = self.hxDead[:, t].reshape((3, 1))        # x[t]
+            xPast = self.hxDead[:, t-1].reshape((3, 1))     # x[t-1]
+            uNow = self.hu[:, t].reshape((2, 1))            # u[t]
+            uPast = self.hu[:, t-1].reshape((2, 1))         # u[t-1]
 
             #print(ui)
 
-            R = self.compute_R(xn)
-            G = self.compute_jacob_G(xn, ui)
+            R = self.compute_R(xPast, uNow)
+            G = self.compute_jacob_G(xPast, uNow)
             # Add Edge for all controls
-            InfoM, InfoV = self.add_edge_control(InfoM, InfoV, R, G, xn, xp, t)
-            # Features[t]
-            zt = self.hz[:, (t-1)*3:t*3]
+            InfoM, InfoV = self.add_edge_control(InfoM, InfoV, R, G, xNow, xPast, t)
+            # Observation[t]
+            zNow = self.hz[:, t*3:(t+1)*3]
             # Map[t-1]
-            mt = self.hm[:, (t-1)*3:t*3]
+            mPast = self.hm[:, (t-1)*3:t*3]
 
             for i in range(len(self.z[:, 0])):
                 #print(self.hz, zt)
                 # i th feature[t-1]
-                mi = mt[i, :]
+                miPast = mPast[i, :]
                 #print(mi)
-                dx = mi[0] - xn[0, 0]
-                dy = mi[1] - xn[1, 0]
+                dx = miPast[0] - xNow[0, 0]
+                dy = miPast[1] - xNow[1, 0]
 
                 H = self.compute_jacob_H(dx, dy)
 
                 # i th observation[t]
-                zi = zt[i, :]
+                ziNow = zNow[i, :]
                 # compute zHat
                 d = math.sqrt(dx**2 + dy**2)
-                angle = pi_2_pi(math.atan2(dy, dx)) - xn[2, 0]
+                angle = pi_2_pi(math.atan2(dy, dx)) - xNow[2, 0]
                 zHat = np.array([d, angle, i])
                 # Add Edge for all observation
-                InfoM, InfoV = self.add_edge_observe(InfoM, InfoV, H, zi, zHat, t, i)
-        print(InfoV)
+                InfoM, InfoV = self.add_edge_observe(InfoM, InfoV, H, ziNow, zHat, t, i)
+        #print(InfoV)
         return InfoM, InfoV
 
 
-    def compute_R(self, xn):
-        #print(xn)
-        V = np.array([[DT * math.cos(xn[2, 0]), 0.0],
-                      [DT * math.sin(xn[2, 0]), 0.0],
-                      [0.0, DT]])
+    def compute_R(self, x, u):
+
+        if u[1, 0] == 0:
+
+            V = np.array([[DT * math.cos(x[2, 0]), 0.0],
+                          [DT * math.sin(x[2, 0]), 0.0],
+                          [0.0, DT]])
+        else:
+
+            r = u[0, 0] / u[1, 0]
+
+            s0 = math.sin(x[2, 0])
+            s1 = math.sin(x[2, 0] + DT * u[1, 0])
+            c0 = math.cos(x[2, 0])
+            c1 = math.cos(x[2, 0] + DT * u[1, 0])
+
+            V = np.array([[-(s0 - s1) / u[1, 0],  (s0 - s1) * u[0, 0] / u[1, 0]**2 + DT * c1 / u[1, 0] * u[0, 0]],
+                          [ (c0 - c1) / u[1, 0], -(c0 - c1) * u[0, 0] / u[1, 0]**2 + DT * s1 / u[1, 0] * u[0, 0]],
+                          [0.0, DT]])
 
         return V @ self.M @ V.T
 
-    def compute_jacob_G(self, xn, ui):
-        #print(ui)
-        G = np.array([[1.0, 0.0, - DT * ui[0, 0] * math.sin(xn[2, 0])],
-                      [0.0, 1.0,   DT * ui[1, 0] * math.cos(xn[2, 0])],
-                      [0.0, 0.0, 1.0]])
+    def compute_jacob_G(self, x, u):
+
+        if u[1, 0] == 0:
+
+            G = np.array([[1.0, 0.0, -DT * u[0, 0] * math.sin(x[2, 0])],
+                          [0.0, 1.0,  DT * u[0, 0] * math.sin(x[2, 0])],
+                          [0.0, 0.0, 1.0]])
+
+        else:
+
+            r = u[0, 0] / u[1, 0]
+
+            G = np.array([[1.0, 0.0, -r * math.cos(x[2, 0]) + r * math.cos(x[2, 0] + DT * u[1, 0])],
+                          [0.0, 1.0, -r * math.sin(x[2, 0]) + r * math.sin(x[2, 0] + DT * u[1, 0])],
+                          [0.0, 0.0, 1.0]])
 
         return G
 
@@ -237,7 +258,7 @@ class Robot():
 
         return H
 
-    def add_edge_control(self, InfoM, InfoV, R, G, xn, xp, t):
+    def add_edge_control(self, InfoM, InfoV, R, G, xNow, xPast, t):
 
         I = np.eye(STATE_SIZE)
         GI = np.hstack((-G, I))
@@ -252,14 +273,14 @@ class Robot():
         InfoM[t*3:(t+1)*3, (t-1)*3:t*3] += Om[3:6, 0:3]
         InfoM[t*3:(t+1)*3, t*3:(t+1)*3] += Om[3:6, 3:6]
 
-        xi = GI.T @ RInv @ (xn - G @ xp)
+        xi = GI.T @ RInv @ (xNow - G @ xPast)
         #print(xi[0:3, 0].reshape((3, 1)))
         InfoV[(t-1)*3:t*3, 0] += xi[0:3, 0]
         InfoV[t*3:(t+1)*3, 0] += xi[3:6, 0]
         #print(InfoV)
         return InfoM, InfoV
 
-    def add_edge_observe(self, InfoM, InfoV, H, zi, zHat, t, i):
+    def add_edge_observe(self, InfoM, InfoV, H, ziNow, zHat, t, i):
 
         QInv = np.linalg.inv(Q)
         Om = H.T @ QInv @ H
@@ -271,7 +292,7 @@ class Robot():
         InfoM[t*3:(t+1)*3, xlen*3+i*3:xlen*3+(i+1)*3] += Om[0:3, 3:6]
         InfoM[xlen*3+i*3:xlen*3+(i+1)*3, t*3:(t+1)*3] += Om[3:6, 0:3]
         InfoM[xlen*3+i*3:xlen*3+(i+1)*3, xlen*3+i*3:xlen*3+(i+1)*3] += Om[3:6, 3:6]
-        #print(self.hm)
+        #print(self.hm[i, (t-1)*3:t*3])
         # Creat complex state vector
         yt = np.zeros((6, 1))
         yt[0, 0] = self.hxDead[0, t]
@@ -279,8 +300,8 @@ class Robot():
         yt[2, 0] = self.hxDead[2, t]
         yt[3:6, 0] = self.hm[i, (t-1)*3:t*3]
         #yt[3, 0] = self.hm[i, t]
-        #print(InfoM)
-        xi = H.T @ QInv @ (zi.T - zHat.T + H @ yt)
+        #print(yt)
+        xi = H.T @ QInv @ (ziNow.T - zHat.T + H @ yt)
 
         InfoV[t*3:(t+1)*3, 0] += xi[0:3, 0]
         InfoV[xlen*3+i*3:xlen*3+(i+1)*3, 0] += xi[3:6, 0]
@@ -334,15 +355,20 @@ def calc_input():
 
 def motion_model(x, u):
 
-    F = np.array([[1.0, 0, 0],
-                  [0, 1.0, 0],
-                  [0, 0, 1.0]])
+    if u[1, 0] == 0:
 
-    B = np.array([[DT * math.cos(x[2, 0]), 0],
-                  [DT * math.sin(x[2, 0]), 0],
-                  [0.0, DT]])
+        dx = np.array([[DT * math.cos(x[2, 0])],
+                       [DT * math.sin(x[2, 0])],
+                       [0.0]])
+    else:
 
-    x = F @ x + B @ u
+        r = u[0, 0] / u[1, 0]
+
+        dx = np.array([[-r * math.sin(x[2, 0]) + r * math.sin(x[2, 0] + DT * u[1, 0])],
+                       [ r * math.cos(x[2, 0]) - r * math.cos(x[2, 0] + DT * u[1, 0])],
+                       [DT * u[1, 0]]])
+
+    x = x + dx
 
     return x
 
@@ -374,23 +400,27 @@ def main():
         u = calc_input()
         rov.action(u)
         rov.observation(LANDMARK)
-        rov.graph_slam()
+        _, xAve = rov.graph_slam()
 
         if show_animation:  # pragma: no cover
             plt.cla()
 
             plt.plot(LANDMARK[:, 0], LANDMARK[:, 1], "*k")
 
+            for i in range(len(rov.hm[:, 0])):
+                plt.plot(rov.hm[i, 3].flatten(), rov.hm[i, 4].flatten(), "xg")
+                plt.plot(rov.m[i, 0], rov.m[i, 1], "*y")
+
             plt.plot(rov.hxTrue[0, :].flatten(),
                      rov.hxTrue[1, :].flatten(), "-b")
             plt.plot(rov.hxDead[0, :].flatten(),
                      rov.hxDead[1, :].flatten(), "-k")
-            #plt.plot(rov.hxSlam[0, :].flatten(),
-            #         rov.hxSlam[1, :].flatten(), "-r")
+            #plt.plot(xAve[0::3].flatten(),
+            #         xAve[1::3].flatten(), "-r")
             plt.plot(rov.xSlam[0], rov.xSlam[1], "xk")
             plt.axis("equal")
             plt.grid(True)
-            plt.title("Time" + str(time)[0:5])
+            #plt.title("Time" + str(time)[0:5])
             plt.pause(1.0)
 
 if __name__ == '__main__':
