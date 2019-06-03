@@ -10,10 +10,10 @@ import math
 import matplotlib.pyplot as plt
 
 #  Simulation parameter
-Q = np.diag([0.1, np.deg2rad(1.0), 0.1])**2
-M = np.diag([0.1, np.deg2rad(1.0)])**2
+Q = np.diag([0.3, np.deg2rad(1.0), 1.0])**2
+M = np.diag([0.3, np.deg2rad(5.0)])**2
 
-DT = 1.0  # time tick [s]
+DT = 2.0  # time tick [s]
 SIM_TIME = 100.0  # simulation time [s]
 MAX_STEP = 100
 MAX_RANGE = 300.0  # maximum observation range
@@ -172,7 +172,8 @@ class Robot():
 
             #plt.plot(xNow[0, 0], xNow[1, 0], "xr")
             #print(xNow)
-            R = self.compute_R(xPast, uNow)
+            R = np.diag([0.1, 0.1, np.deg2rad(1.0)])
+            #R = self.compute_R(xPast, uNow)
             G = self.compute_jacob_G(xPast, uNow)
             # Add Edge for all controls
             InfoM, InfoV = self.add_edge_control(InfoM, InfoV, R, G, xNow, xPast, t)
@@ -184,19 +185,19 @@ class Robot():
             for i in range(len(self.z[:, 0])):
                 #print(self.hz, zt)
                 # i th feature[t-1]
-                miPast = mPast[i, :]
-                #print(mi)
-                dx = miPast[0] - xNow[0, 0]
-                dy = miPast[1] - xNow[1, 0]
+                miPast = mPast[i, :].reshape((3, 1))
+                #print(miPast)
+                dx = miPast[0, 0] - xNow[0, 0]
+                dy = miPast[1, 0] - xNow[1, 0]
 
                 H = self.compute_jacob_H(dx, dy)
 
                 # i th observation[t]
-                ziNow = zNow[i, :]
+                ziNow = zNow[i, :].reshape((3, 1))
                 # compute zHat
                 d = math.sqrt(dx**2 + dy**2)
                 angle = pi_2_pi(math.atan2(dy, dx)) - xNow[2, 0]
-                zHat = np.array([d, angle, i])
+                zHat = np.array([d, angle, i]).reshape((3, 1))
                 #print(ziNow-zHat)
                 # Add Edge for all observation
                 InfoM, InfoV = self.add_edge_observe(InfoM, InfoV, H, ziNow, zHat, t, i)
@@ -214,14 +215,15 @@ class Robot():
         else:
 
             r = u[0, 0] / u[1, 0]
+            w = u[0, 0] / u[1, 0]**2
 
             s0 = math.sin(x[2, 0])
             s1 = math.sin(x[2, 0] + DT * u[1, 0])
             c0 = math.cos(x[2, 0])
             c1 = math.cos(x[2, 0] + DT * u[1, 0])
 
-            V = np.array([[-(s0 - s1) / u[1, 0],  (s0 - s1) * u[0, 0] / u[1, 0]**2 + DT * c1 / u[1, 0] * u[0, 0]],
-                          [ (c0 - c1) / u[1, 0], -(c0 - c1) * u[0, 0] / u[1, 0]**2 + DT * s1 / u[1, 0] * u[0, 0]],
+            V = np.array([[-(s0 - s1) / u[1, 0],  w * (s0 - s1) + DT * r * c1],
+                          [ (c0 - c1) / u[1, 0], -w * (c0 - c1) + DT * r * s1],
                           [0.0, DT]])
 
         return V @ self.M @ V.T
@@ -273,8 +275,10 @@ class Robot():
         InfoM[xId2:xId2+3, xId1:xId1+3] += Om[3:6, 0:3]
         InfoM[xId2:xId2+3, xId2:xId2+3] += Om[3:6, 3:6]
 
+        #print(xNow - G @ xPast)
         xi = GI.T @ RInv @ (xNow - G @ xPast)
-        #print(xi[0:3, 0].reshape((3, 1)))
+        #xi = GI.T @ RInv @ np.zeros((3, 1))
+        #print(np.linalg.cond(R))
         InfoV[xId1:xId1+3, 0] += xi[0:3, 0]
         InfoV[xId2:xId2+3, 0] += xi[3:6, 0]
         #print(InfoV)
@@ -302,9 +306,10 @@ class Robot():
         yt[2, 0] = self.hxDead[2, t]
         yt[3:6, 0] = self.hm[i, (t-1)*3:t*3]
         #yt[3, 0] = self.hm[i, t]
-        print(ziNow - zHat + H @ yt)
-        xi = H.T @ QInv @ (ziNow.T - zHat.T + H @ yt)
-        #xi = H.T @ QInv @ H @ yt
+        #print(ziNow - zHat + H @ yt)
+        xi = H.T @ QInv @ (ziNow - zHat + H @ yt)
+        #xi = H.T @ QInv @ np.zeros((3, 1))
+        #print(Q @ QInv)
 
         InfoV[xId:xId+3, 0] += xi[0:3, 0]
         InfoV[mId:mId+2, 0] += xi[3:5, 0]
@@ -331,14 +336,14 @@ class Robot():
         IVm = InfoV[xId:xId+mId, 0]
 
         IVTil = IVx - IMxm @ IMmmInv @ IVm
-        #print(IVTil)
+        #print(np.linalg.cond(IMmm))
         return IMTil, IVTil
 
     def edge_solve(self, IMTil, IVTil):
 
         xCov = np.linalg.inv(IMTil)
         xAve = xCov @ IVTil
-        #print(xAve)
+        #print(np.linalg.cond(IMTil))
         return xCov, xAve
 
     def extract_pos(self, xAve):
@@ -362,8 +367,8 @@ def motion_model(x, u):
 
     if u[1, 0] == 0:
 
-        dx = np.array([[DT * math.cos(x[2, 0])],
-                       [DT * math.sin(x[2, 0])],
+        dx = np.array([[DT * u[0, 0] * math.cos(x[2, 0])],
+                       [DT * u[0, 0] * math.sin(x[2, 0])],
                        [0.0]])
     else:
 
@@ -426,7 +431,7 @@ def main():
             plt.axis("equal")
             plt.grid(True)
             #plt.title("Time" + str(time)[0:5])
-            plt.pause(1.0)
+            plt.pause(0.5)
 
 if __name__ == '__main__':
     main()
