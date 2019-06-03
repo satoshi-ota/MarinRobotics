@@ -197,7 +197,7 @@ class Robot():
                 d = math.sqrt(dx**2 + dy**2)
                 angle = pi_2_pi(math.atan2(dy, dx)) - xNow[2, 0]
                 zHat = np.array([d, angle, i])
-                print(ziNow-zHat)
+                #print(ziNow-zHat)
                 # Add Edge for all observation
                 InfoM, InfoV = self.add_edge_observe(InfoM, InfoV, H, ziNow, zHat, t, i)
         #print(InfoV)
@@ -302,9 +302,9 @@ class Robot():
         yt[2, 0] = self.hxDead[2, t]
         yt[3:6, 0] = self.hm[i, (t-1)*3:t*3]
         #yt[3, 0] = self.hm[i, t]
-        #print(yt)
-        #xi = H.T @ QInv @ (ziNow.T - zHat.T + H @ yt)
-        xi = H.T @ QInv @ H @ yt
+        print(ziNow - zHat + H @ yt)
+        xi = H.T @ QInv @ (ziNow.T - zHat.T + H @ yt)
+        #xi = H.T @ QInv @ H @ yt
 
         InfoV[xId:xId+3, 0] += xi[0:3, 0]
         InfoV[mId:mId+2, 0] += xi[3:5, 0]
