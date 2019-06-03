@@ -172,8 +172,8 @@ class Robot():
 
             #plt.plot(xNow[0, 0], xNow[1, 0], "xr")
             #print(xNow)
-            R = np.diag([0.1, 0.1, np.deg2rad(1.0)])
-            #R = self.compute_R(xPast, uNow)
+            #R = np.diag([0.1, 0.1, np.deg2rad(1.0)])
+            R = self.compute_R(xPast, uNow)
             G = self.compute_jacob_G(xPast, uNow)
             # Add Edge for all controls
             InfoM, InfoV = self.add_edge_control(InfoM, InfoV, R, G, xNow, xPast, t)
@@ -226,7 +226,12 @@ class Robot():
                           [ (c0 - c1) / u[1, 0], -w * (c0 - c1) + DT * r * s1],
                           [0.0, DT]])
 
-        return V @ self.M @ V.T
+            VInv = np.linalg.pinv(V)
+            VTInv = np.linalg.pinv(V.T)
+            MInv = np.linalg.inv(M)
+            #print(VInv @ V)
+
+        return VTInv @ MInv @ VInv
 
     def compute_jacob_G(self, x, u):
 
@@ -257,12 +262,12 @@ class Robot():
 
         return H
 
-    def add_edge_control(self, InfoM, InfoV, R, G, xNow, xPast, t):
+    def add_edge_control(self, InfoM, InfoV, RInv, G, xNow, xPast, t):
 
         I = np.eye(STATE_SIZE)
         GI = np.hstack((-G, I))
 
-        RInv = np.linalg.inv(R)
+        #RInv = np.linalg.inv(R)
 
         Om = GI.T @ RInv @ GI
 
@@ -278,7 +283,7 @@ class Robot():
         #print(xNow - G @ xPast)
         xi = GI.T @ RInv @ (xNow - G @ xPast)
         #xi = GI.T @ RInv @ np.zeros((3, 1))
-        #print(np.linalg.cond(R))
+        #print(R @ RInv)
         InfoV[xId1:xId1+3, 0] += xi[0:3, 0]
         InfoV[xId2:xId2+3, 0] += xi[3:6, 0]
         #print(InfoV)
