@@ -173,10 +173,10 @@ class Robot():
             #plt.plot(xNow[0, 0], xNow[1, 0], "xr")
             #print(xNow)
             #R = np.diag([0.1, 0.1, np.deg2rad(1.0)])
-            R = self.compute_R(xPast, uNow)
+            RInv = self.compute_R(xPast, uNow)
             G = self.compute_jacob_G(xPast, uNow)
             # Add Edge for all controls
-            InfoM, InfoV = self.add_edge_control(InfoM, InfoV, R, G, xNow, xPast, t)
+            InfoM, InfoV = self.add_edge_control(InfoM, InfoV, RInv, G, xNow, xPast, t)
             # Observation[t]
             zNow = self.hz[:, t*3:(t+1)*3]
             # Map[t-1]
@@ -229,7 +229,7 @@ class Robot():
             VInv = np.linalg.pinv(V)
             VTInv = np.linalg.pinv(V.T)
             MInv = np.linalg.inv(M)
-            #print(VInv @ V)
+            print(VTInv @ V.T)
 
         return VTInv @ MInv @ VInv
 
