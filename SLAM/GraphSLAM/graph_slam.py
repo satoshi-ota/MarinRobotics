@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 Q = np.diag([0.1, np.deg2rad(1.0), 0.1])**2
 M = np.diag([0.1, np.deg2rad(1.0)])**2
 
-DT = 0.5  # time tick [s]
+DT = 1.0  # time tick [s]
 SIM_TIME = 100.0  # simulation time [s]
 MAX_STEP = 100
 MAX_RANGE = 300.0  # maximum observation range
@@ -21,11 +21,7 @@ STATE_SIZE = 3  # State size [x,y,yaw]
 OBS_SIZE = 3    # Observation size [d, phi, c]
 MAP_SIZE = 3    # Map size [mx, my, s]
 
-show_graph_dtime = 20.0  # [s]
 show_animation = True
-
-first_obs = True
-first_control = True
 
 class Robot():
 
@@ -152,16 +148,16 @@ class Robot():
 
     def edge_init(self):
 
-        full_size = self.step_cnt + self.lm_num
-        InfoM = np.zeros((full_size * 3, full_size * 3))    # Full scale Infomation matrix
-        InfoV = np.zeros((full_size * 3, 1))                # Full scale Infomation vector
+        full_size = self.step_cnt * 3 + self.lm_num * 2
+        InfoM = np.zeros((full_size, full_size))    # Full scale Infomation matrix
+        InfoV = np.zeros((full_size, 1))                # Full scale Infomation vector
 
         return InfoM, InfoV
 
     def edge_linearize(self, InfoM, InfoV):
 
         # Add Infomation matrix[t=0]
-        InfoM[0:3, 0:3] = np.diag([1e+6, 1e+6, 1e+6])
+        InfoM[0:3, 0:3] = np.diag([1e+3, 1e+3, 1e+3])
 
         for t in range(len(self.hxDead[0, :])):
             #print(self.hu)
@@ -174,8 +170,8 @@ class Robot():
             uNow = self.hu[:, t].reshape((2, 1))            # u[t]
             uPast = self.hu[:, t-1].reshape((2, 1))         # u[t-1]
 
-            #print(ui)
-
+            #plt.plot(xNow[0, 0], xNow[1, 0], "xr")
+            #print(xNow)
             R = self.compute_R(xPast, uNow)
             G = self.compute_jacob_G(xPast, uNow)
             # Add Edge for all controls
@@ -201,6 +197,7 @@ class Robot():
                 d = math.sqrt(dx**2 + dy**2)
                 angle = pi_2_pi(math.atan2(dy, dx)) - xNow[2, 0]
                 zHat = np.array([d, angle, i])
+                print(ziNow-zHat)
                 # Add Edge for all observation
                 InfoM, InfoV = self.add_edge_observe(InfoM, InfoV, H, ziNow, zHat, t, i)
         #print(InfoV)
@@ -267,16 +264,19 @@ class Robot():
 
         Om = GI.T @ RInv @ GI
 
+        xId1 = (t-1)*3
+        xId2 = t*3
+
         # Add Edge
-        InfoM[(t-1)*3:t*3, (t-1)*3:t*3] += Om[0:3, 0:3]
-        InfoM[(t-1)*3:t*3, t*3:(t+1)*3] += Om[0:3, 3:6]
-        InfoM[t*3:(t+1)*3, (t-1)*3:t*3] += Om[3:6, 0:3]
-        InfoM[t*3:(t+1)*3, t*3:(t+1)*3] += Om[3:6, 3:6]
+        InfoM[xId1:xId1+3, xId1:xId1+3] += Om[0:3, 0:3]
+        InfoM[xId1:xId1+3, xId2:xId2+3] += Om[0:3, 3:6]
+        InfoM[xId2:xId2+3, xId1:xId1+3] += Om[3:6, 0:3]
+        InfoM[xId2:xId2+3, xId2:xId2+3] += Om[3:6, 3:6]
 
         xi = GI.T @ RInv @ (xNow - G @ xPast)
         #print(xi[0:3, 0].reshape((3, 1)))
-        InfoV[(t-1)*3:t*3, 0] += xi[0:3, 0]
-        InfoV[t*3:(t+1)*3, 0] += xi[3:6, 0]
+        InfoV[xId1:xId1+3, 0] += xi[0:3, 0]
+        InfoV[xId2:xId2+3, 0] += xi[3:6, 0]
         #print(InfoV)
         return InfoM, InfoV
 
@@ -286,12 +286,14 @@ class Robot():
         Om = H.T @ QInv @ H
 
         xlen = len(self.hxDead[0, :])
-        #print(xlen)
+        xId = t*3
+        mId = xlen*3 + i*2
+        #print(Om)
         # Add Edge
-        InfoM[t*3:(t+1)*3, t*3:(t+1)*3] += Om[0:3, 0:3]
-        InfoM[t*3:(t+1)*3, xlen*3+i*3:xlen*3+(i+1)*3] += Om[0:3, 3:6]
-        InfoM[xlen*3+i*3:xlen*3+(i+1)*3, t*3:(t+1)*3] += Om[3:6, 0:3]
-        InfoM[xlen*3+i*3:xlen*3+(i+1)*3, xlen*3+i*3:xlen*3+(i+1)*3] += Om[3:6, 3:6]
+        InfoM[xId:xId+3, xId:xId+3] += Om[0:3, 0:3]
+        InfoM[xId:xId+3, mId:mId+2] += Om[0:3, 3:5]
+        InfoM[mId:mId+2, xId:xId+3] += Om[3:5, 0:3]
+        InfoM[mId:mId+2, mId:mId+2] += Om[3:5, 3:5]
         #print(self.hm[i, (t-1)*3:t*3])
         # Creat complex state vector
         yt = np.zeros((6, 1))
@@ -301,29 +303,32 @@ class Robot():
         yt[3:6, 0] = self.hm[i, (t-1)*3:t*3]
         #yt[3, 0] = self.hm[i, t]
         #print(yt)
-        xi = H.T @ QInv @ (ziNow.T - zHat.T + H @ yt)
+        #xi = H.T @ QInv @ (ziNow.T - zHat.T + H @ yt)
+        xi = H.T @ QInv @ H @ yt
 
-        InfoV[t*3:(t+1)*3, 0] += xi[0:3, 0]
-        InfoV[xlen*3+i*3:xlen*3+(i+1)*3, 0] += xi[3:6, 0]
+        InfoV[xId:xId+3, 0] += xi[0:3, 0]
+        InfoV[mId:mId+2, 0] += xi[3:5, 0]
         #print(InfoV)
         return InfoM, InfoV
 
     def edge_reduce(self, InfoM, InfoV):
 
         xlen = len(self.hxDead[0, :])
-        mlen = len(self.z[: , 0])
+        mlen = len(self.z[:, 0])
+        xId = xlen*3
+        mId = mlen*2
         #print(mlen)
-        IMxx = InfoM[0:xlen*3, 0:xlen*3]
-        IMxm = InfoM[0:xlen*3, xlen*3:xlen*3+mlen*3]
-        IMmx = InfoM[xlen*3:xlen*3+mlen*3, 0:xlen*3]
-        IMmm = InfoM[xlen*3:xlen*3+mlen*3, xlen*3:xlen*3+mlen*3]
+        IMxx = InfoM[0:xId, 0:xId]
+        IMxm = InfoM[0:xId, xId:xId+mId]
+        IMmx = InfoM[xId:xId+mId, 0:xId]
+        IMmm = InfoM[xId:xId+mId, xId:xId+mId]
 
         IMmmInv = np.linalg.inv(IMmm)
 
         IMTil = IMxx - IMxm @ IMmmInv @ IMmx
 
-        IVx = InfoV[0:xlen*3, 0]
-        IVm = InfoV[xlen*3:xlen*3+mlen*3, 0]
+        IVx = InfoV[0:xId, 0]
+        IVm = InfoV[xId:xId+mId, 0]
 
         IVTil = IVx - IMxm @ IMmmInv @ IVm
         #print(IVTil)
